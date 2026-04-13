@@ -27,7 +27,7 @@ duckdb = { version = "1.2", features = ["bundled"] }
 arrow = { version = "54", features = ["ipc"] }
 
 # Kafka
-rdkafka = { version = "0.37", features = ["cmake-build"], optional = true }
+rdkafka = { version = "0.37", features = ["dynamic-linking"], optional = true }
 
 # NATS (optional at runtime, always compiled)
 async-nats = "0.39"
