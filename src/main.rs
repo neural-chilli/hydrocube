@@ -1,6 +1,7 @@
 // src/main.rs
 pub mod cli;
 pub mod config;
+pub mod db_manager;
 pub mod error;
 
 use clap::Parser;
