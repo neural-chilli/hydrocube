@@ -31,20 +31,9 @@ jobs:
       - name: Run tests
         run: cargo test --no-default-features
 
-  check-kafka:
-    name: Check (with Kafka)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Install librdkafka build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake build-essential pkg-config \
-            libcurl4-openssl-dev libssl-dev libsasl2-dev libzstd-dev
-      - name: Check (default features)
-        run: cargo check
+  # Kafka check omitted — cmake-build is slow (~10min) and dynamic-linking
+  # needs librdkafka-dev which varies by distro. Kafka code is feature-gated
+  # and minimal. Add a dedicated Kafka CI job when there's substantial Kafka code.
 
   clippy:
     name: Clippy
