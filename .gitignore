@@ -1,0 +1,16 @@
+# Rust/Cargo build artifacts
+/target/
+Cargo.lock
+
+# IDE files
+/.idea/
+*.swp
+*.swo
+*~
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Claude AI worktrees (project-specific)
+/.claude/worktrees/

@@ -1,0 +1,63 @@
+[package]
+name = "hydrocube"
+version = "0.1.0"
+edition = "2021"
+description = "Real-time aggregation engine"
+
+[features]
+default = ["kafka"]
+kafka = ["rdkafka"]
+
+[dependencies]
+# Core
+tokio = { version = "1", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+thiserror = "2"
+anyhow = "1"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# DuckDB
+duckdb = { version = "1.2", features = ["bundled"] }
+
+# Arrow
+arrow = { version = "54", features = ["ipc"] }
+
+# Kafka
+rdkafka = { version = "0.37", features = ["cmake-build"], optional = true }
+
+# NATS (optional at runtime, always compiled)
+async-nats = "0.39"
+
+# Lua
+mlua = { version = "0.10", features = ["lua54", "vendored", "serialize"] }
+
+# Web
+axum = { version = "0.8", features = ["ws"] }
+axum-extra = { version = "0.10", features = ["typed-header"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "fs"] }
+rust-embed = "8"
+
+# Templating
+minijinja = { version = "2", features = ["loader"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Misc
+base64 = "0.22"
+sha2 = "0.10"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4"] }
+async-trait = "0.1"
+futures = "0.3"
+mime_guess = "2"
+
+[dev-dependencies]
+tempfile = "3"
+tokio-test = "0.4"
