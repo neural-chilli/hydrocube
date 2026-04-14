@@ -8,8 +8,10 @@ pub mod delta;
 pub mod error;
 pub mod ingest;
 pub mod persistence;
+pub mod publish;
 pub mod retention;
 pub mod transform;
+pub mod web;
 
 use clap::Parser;
 use cli::Cli;
