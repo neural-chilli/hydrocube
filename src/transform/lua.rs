@@ -122,7 +122,7 @@ impl LuaTransform {
 // ---------------------------------------------------------------------------
 
 /// Convert serde_json::Value → mlua::Value.
-fn json_to_lua<'lua>(lua: &'lua Lua, value: Value) -> HcResult<LuaValue> {
+fn json_to_lua(lua: &Lua, value: Value) -> HcResult<LuaValue> {
     let v = match value {
         Value::Null => LuaValue::Nil,
         Value::Bool(b) => LuaValue::Boolean(b),
@@ -161,11 +161,7 @@ fn lua_to_json(value: LuaValue) -> Value {
 }
 
 /// Build a Lua table `{col_name = value, ...}` from a single row.
-fn row_to_lua_table<'lua>(
-    lua: &'lua Lua,
-    row: Vec<Value>,
-    col_names: &[String],
-) -> HcResult<mlua::Table> {
+fn row_to_lua_table(lua: &Lua, row: Vec<Value>, col_names: &[String]) -> HcResult<mlua::Table> {
     let tbl = lua
         .create_table()
         .map_err(|e| HcError::Transform(format!("Lua table create error: {e}")))?;
@@ -180,8 +176,8 @@ fn row_to_lua_table<'lua>(
 }
 
 /// Build a Lua array of row tables.
-fn rows_to_lua_table<'lua>(
-    lua: &'lua Lua,
+fn rows_to_lua_table(
+    lua: &Lua,
     rows: Vec<Vec<Value>>,
     col_names: &[String],
 ) -> HcResult<mlua::Table> {
