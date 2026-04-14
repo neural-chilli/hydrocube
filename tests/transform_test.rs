@@ -1,11 +1,17 @@
 // tests/transform_test.rs
 //
-// Integration tests for the SQL transform pipeline.
+// Integration tests for the SQL and Lua transform pipelines.
 
 use hydrocube::config::ColumnDef;
 use hydrocube::db_manager::DbManager;
+use hydrocube::transform::lua::LuaTransform;
 use hydrocube::transform::sql::SqlTransform;
 use serde_json::json;
+use std::sync::Mutex;
+
+// Lua tests must run serially because the vendored Lua C library uses global
+// state that is not safe for concurrent multi-threaded access.
+static LUA_LOCK: Mutex<()> = Mutex::new(());
 
 /// Helper: build a two-column schema with an INTEGER id and a DOUBLE value.
 fn two_col_schema() -> Vec<ColumnDef> {
@@ -124,4 +130,126 @@ async fn test_sql_transform_null_values() {
     assert!(result[0][1].is_null(), "expected NULL in first row's value");
 
     db.shutdown().await;
+}
+
+// ---------------------------------------------------------------------------
+// Lua transform tests
+// ---------------------------------------------------------------------------
+
+fn two_col_names() -> Vec<String> {
+    vec!["id".to_string(), "value".to_string()]
+}
+
+#[test]
+fn test_lua_batch_transform() {
+    let _guard = LUA_LOCK.lock().unwrap();
+
+    // Inline Lua: transform_batch doubles positive values, filters negatives.
+    let source = r#"
+function transform_batch(messages)
+    local out = {}
+    for _, msg in ipairs(messages) do
+        if msg.value > 0 then
+            table.insert(out, {id = msg.id, value = msg.value * 2})
+        end
+    end
+    return out
+end
+"#
+    .to_string();
+
+    let col_names = two_col_names();
+    let transform = LuaTransform::from_source(source, "transform_batch".to_string(), None)
+        .expect("LuaTransform should load");
+
+    // Three rows: (1, 10), (2, -5), (3, 20)
+    let input = vec![
+        vec![json!(1), json!(10)],
+        vec![json!(2), json!(-5)],
+        vec![json!(3), json!(20)],
+    ];
+
+    let result = transform
+        .execute_batch(input, &col_names)
+        .expect("batch transform should succeed");
+
+    // Negatives filtered → 2 rows; values doubled → 20, 40
+    assert_eq!(result.len(), 2, "expected 2 rows after filtering negatives");
+
+    // Each row has 2 values: id and doubled value.
+    // Collect all integer values across all rows and verify 20 and 40 appear.
+    let all_values: Vec<i64> = result
+        .iter()
+        .flat_map(|row| row.iter().filter_map(|v| v.as_i64()))
+        .collect();
+
+    assert!(
+        all_values.contains(&20),
+        "expected doubled value 20 in result, got: {all_values:?}"
+    );
+    assert!(
+        all_values.contains(&40),
+        "expected doubled value 40 in result, got: {all_values:?}"
+    );
+}
+
+#[test]
+fn test_lua_per_message_fallback() {
+    let _guard = LUA_LOCK.lock().unwrap();
+
+    // Inline Lua: transform(msg) returns a one-element array containing the
+    // transformed row table.  {{...}} in Lua means a table of tables.
+    let source = r#"
+function transform(msg)
+    return {{id = msg.id, value = msg.value + 1}}
+end
+"#
+    .to_string();
+
+    let col_names = two_col_names();
+    let transform = LuaTransform::from_source(source, "transform".to_string(), None)
+        .expect("LuaTransform should load");
+
+    let input = vec![vec![json!(1), json!(9)]];
+
+    let result = transform
+        .execute_per_message(input, &col_names)
+        .expect("per-message transform should succeed");
+
+    assert_eq!(result.len(), 1, "expected 1 output row");
+    // The row has 2 values: id=1 and value=10 (9+1).
+    // Assert that 10 appears somewhere in the row values.
+    let int_values: Vec<i64> = result[0].iter().filter_map(|v| v.as_i64()).collect();
+    assert!(
+        int_values.contains(&10),
+        "expected incremented value 10 in row, got: {int_values:?}"
+    );
+}
+
+#[test]
+fn test_lua_transform_returns_empty_filters_message() {
+    let _guard = LUA_LOCK.lock().unwrap();
+
+    // Inline Lua: transform_batch returns empty table → all messages filtered.
+    let source = r#"
+function transform_batch(messages)
+    return {}
+end
+"#
+    .to_string();
+
+    let col_names = two_col_names();
+    let transform = LuaTransform::from_source(source, "transform_batch".to_string(), None)
+        .expect("LuaTransform should load");
+
+    let input = vec![vec![json!(1), json!(42)]];
+
+    let result = transform
+        .execute_batch(input, &col_names)
+        .expect("batch transform should succeed");
+
+    assert!(
+        result.is_empty(),
+        "expected 0 rows when transform_batch returns empty table"
+    );
 }

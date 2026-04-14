@@ -36,6 +36,9 @@ impl TransformPipeline {
     ) -> HcResult<Vec<Vec<Value>>> {
         let mut current = input;
 
+        // Extract column names once for Lua steps.
+        let col_names: Vec<String> = columns.iter().map(|c| c.name.clone()).collect();
+
         for step in &self.steps {
             current = match step {
                 TransformStep::Sql { sql } => {
@@ -47,9 +50,15 @@ impl TransformPipeline {
                     function,
                     init,
                 } => {
-                    // LuaTransform::new returns an Err immediately (stub).
-                    let transform = LuaTransform::new(script, function, init.as_deref())?;
-                    transform.execute(db, columns, current).await?
+                    let transform =
+                        LuaTransform::from_file(script.clone(), function.clone(), init.clone())?;
+                    // Use batch mode when the function name contains "batch",
+                    // otherwise fall back to per-message mode.
+                    if function.contains("batch") {
+                        transform.execute_batch(current, &col_names)?
+                    } else {
+                        transform.execute_per_message(current, &col_names)?
+                    }
                 }
             };
         }
