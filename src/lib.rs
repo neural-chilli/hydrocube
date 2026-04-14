@@ -5,4 +5,5 @@ pub mod cli;
 pub mod config;
 pub mod db_manager;
 pub mod error;
+pub mod ingest;
 pub mod persistence;
