@@ -180,6 +180,53 @@ async fn main() {
     });
 
     // -------------------------------------------------------------------------
+    // 13b. Raw message channel for ingest → engine
+    // -------------------------------------------------------------------------
+    let (raw_tx, raw_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(10_000);
+
+    // Spawn Kafka ingest (only when kafka feature enabled and source is kafka)
+    #[cfg(feature = "kafka")]
+    {
+        if config.source.source_type == "kafka" {
+            use hydrocube::ingest::kafka::KafkaSource;
+            use hydrocube::ingest::IngestSource;
+            let source = KafkaSource::new(&config.source).unwrap_or_else(|e| {
+                eprintln!("ERROR: Kafka source init failed: {}", e);
+                std::process::exit(exit_code::SOURCE_CONNECTION_FAILURE);
+            });
+            let ingest_shutdown = shutdown_rx.clone();
+            let ingest_tx = raw_tx.clone();
+            tokio::spawn(async move {
+                if let Err(e) = source.run(ingest_tx, ingest_shutdown).await {
+                    tracing::error!("Ingest error: {}", e);
+                }
+            });
+        }
+    }
+
+    // Drop our copy of raw_tx so channel closes when ingest stops
+    drop(raw_tx);
+
+    // Spawn hot path engine
+    let engine_db = db.clone();
+    let engine_config = config.clone();
+    let engine_broadcast = broadcast_tx.clone();
+    let engine_shutdown = shutdown_rx.clone();
+    tokio::spawn(async move {
+        if let Err(e) = hydrocube::engine::run_hot_path(
+            engine_db,
+            engine_config,
+            raw_rx,
+            engine_broadcast,
+            engine_shutdown,
+        )
+        .await
+        {
+            error!("Engine error: {}", e);
+        }
+    });
+
+    // -------------------------------------------------------------------------
     // 14. Start web server if UI enabled
     // -------------------------------------------------------------------------
     let ui_enabled = !cli.no_ui && config.ui.as_ref().map(|u| u.enabled).unwrap_or(false);

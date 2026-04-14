@@ -8,6 +8,7 @@ pub mod compaction;
 pub mod config;
 pub mod db_manager;
 pub mod delta;
+pub mod engine;
 pub mod error;
 pub mod ingest;
 pub mod persistence;
