@@ -1,4 +1,5 @@
 // src/main.rs
+pub mod aggregation;
 pub mod cli;
 pub mod config;
 pub mod db_manager;

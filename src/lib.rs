@@ -1,6 +1,7 @@
 // src/lib.rs
 // Public library surface — used by integration tests.
 
+pub mod aggregation;
 pub mod cli;
 pub mod config;
 pub mod db_manager;
