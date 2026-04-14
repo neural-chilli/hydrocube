@@ -4,7 +4,7 @@ Real-time aggregation engine. Ingest from message queues, aggregate with DuckDB,
 
 ## What Is This?
 
-HydroCube replaces enterprise OLAP tools like ActivePivot/Atoti for teams that need real-time aggregated views of streaming data — trading positions, order flow, risk metrics, operational dashboards — without the cost, complexity, or operational overhead.
+HydroCube aspires to provide a lightweight alternative to enterprise OLAP tools for teams that need real-time aggregated views of streaming data — trading positions, order flow, risk metrics, operational dashboards — without the cost, complexity, or operational overhead.
 
 **One binary. YAML config. SQL aggregations. No MDX. No JVM. No cluster.**
 
@@ -12,9 +12,9 @@ HydroCube replaces enterprise OLAP tools like ActivePivot/Atoti for teams that n
 
 ## Positioning
 
-ActivePivot charges six to seven figures annually, requires a JVM cluster, proprietary MDX queries, dedicated consultants, and months of implementation. HydroCube delivers 80% of the capability at a fraction of the cost and complexity.
+Enterprise OLAP solutions can carry significant costs, need complex deployments, and require months of implementation. HydroCube delivers 80% of the capability at a fraction of the cost and complexity.
 
-| | ActivePivot | HydroCube |
+| | Traditional Enterprise OLAP | HydroCube |
 |---|---|---|
 | **Runtime** | JVM cluster | Single binary |
 | **Configuration** | Java/Spring + MDX | YAML + SQL |
@@ -529,7 +529,7 @@ SQL transforms run as a single DuckDB query against the `raw_buffer` table and e
 
 ### Design Principle: No Merge Semantics
 
-Traditional real-time OLAP engines (ActivePivot, Druid) maintain merge strategies per aggregate function — SUM is additive, AVG needs weighted recalculation, COUNT DISTINCT is not mergeable at all. This creates complexity, special cases, and approximation errors.
+Traditional real-time OLAP engines maintain merge strategies per aggregate function — SUM is additive, AVG needs weighted recalculation, COUNT DISTINCT is not mergeable at all. This creates complexity, special cases, and approximation errors.
 
 HydroCube takes a fundamentally simpler approach: **never merge. Always recompute from slices.** DuckDB aggregates fast enough that recomputing from recent data every second is cheaper than maintaining merge logic.
 
@@ -867,7 +867,7 @@ On startup:
 4. Any slices above the stored cutoff are still present — the first hot path cycle picks them up and produces a correct aggregate
 5. Resume ingestion from the last committed Kafka offset
 
-No replay from source required. Compare this to ActivePivot, which must rebuild the entire cube from scratch on restart.
+No replay from source required. Compare this to in-memory solutions, which must rebuild the entire cube from scratch on restart.
 
 ### Config Change Handling
 
@@ -1546,7 +1546,7 @@ Business Source License 1.1.
 
 **Change Date:** Three years after final release, converts to Apache 2.0.
 
-The intent: anyone who can't afford ActivePivot uses HydroCube for free. Anyone who can afford ActivePivot pays a fraction of what they'd pay ActivViam.
+The intent: anyone who can't afford traditional OLAP solutions uses HydroCube for free. Anyone who can afford traditional OLAP solutions pays a fraction of what they'd otherwise pay.
 
 ---
 
