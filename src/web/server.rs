@@ -23,14 +23,16 @@ use super::api::{query_handler, schema_handler, snapshot_handler, status_handler
 use super::assets::static_handler;
 
 // ---------------------------------------------------------------------------
-// SSE handler — extracts broadcast_tx from AppState
+// SSE handler — extracts broadcast_tx from AppState and delegates to sse module
 // ---------------------------------------------------------------------------
 
 async fn sse_handler(
     State(state): State<Arc<AppState>>,
-) -> axum::response::sse::Sse<super::sse::SseStream> {
+) -> axum::response::sse::Sse<
+    impl futures::Stream<Item = Result<axum::response::sse::Event, std::convert::Infallible>>,
+> {
     let rx = state.broadcast_tx.subscribe();
-    axum::response::sse::Sse::new(super::sse::SseStream::new(rx))
+    axum::response::sse::Sse::new(super::sse::sse_stream(rx))
 }
 
 // ---------------------------------------------------------------------------

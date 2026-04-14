@@ -5,19 +5,17 @@
 use std::sync::Arc;
 use std::time::Instant;
 
+use crate::aggregation::window::{compaction_cutoff, WINDOW_ID};
+use crate::config::CubeConfig;
+use crate::db_manager::{arrow::compute::concat_batches, DbManager};
+use crate::error::HcError;
+use crate::publish::{batch_to_base64_arrow, DeltaEvent};
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::sync::broadcast;
-use tracing::error;
-
-use crate::aggregation::window::{compaction_cutoff, WINDOW_ID};
-use crate::config::CubeConfig;
-use crate::db_manager::DbManager;
-use crate::error::HcError;
-use crate::publish::{batch_to_base64_arrow, DeltaEvent};
 
 use std::sync::atomic::Ordering;
 
@@ -53,6 +51,24 @@ impl<E: Into<HcError>> From<E> for ApiError {
 }
 
 type ApiResult<T> = Result<T, ApiError>;
+
+// ---------------------------------------------------------------------------
+// Helper: concatenate Arrow batches and serialize to base64
+// ---------------------------------------------------------------------------
+
+fn concat_and_serialize(
+    batches: &[crate::db_manager::RecordBatch],
+) -> Result<(usize, String), ApiError> {
+    if batches.is_empty() {
+        return Ok((0, String::new()));
+    }
+    let schema = batches[0].schema();
+    let merged = concat_batches(&schema, batches)
+        .map_err(|e| ApiError(HcError::Publish(format!("Arrow concat error: {e}"))))?;
+    let row_count = merged.num_rows();
+    let b64 = batch_to_base64_arrow(&merged).map_err(ApiError)?;
+    Ok((row_count, b64))
+}
 
 // ---------------------------------------------------------------------------
 // GET /api/status
@@ -137,31 +153,11 @@ pub async fn snapshot_handler(
     let sql = &state.config.aggregation.sql;
     let batches = state.db.query_arrow(sql).await.map_err(ApiError::from)?;
 
-    let mut row_count = 0usize;
-    let mut all_b64 = String::new();
-
-    for batch in &batches {
-        row_count += batch.num_rows();
-        match batch_to_base64_arrow(batch) {
-            Ok(b64) => all_b64 = b64,
-            Err(e) => {
-                error!(target: "hydrocube::web::api", "snapshot serialization error: {e}");
-                return Err(ApiError(e));
-            }
-        }
-    }
-
-    if batches.is_empty() {
-        // Return an empty response with row_count 0 and empty base64
-        return Ok(Json(SnapshotResponse {
-            row_count: 0,
-            arrow_ipc_b64: String::new(),
-        }));
-    }
+    let (row_count, arrow_ipc_b64) = concat_and_serialize(&batches)?;
 
     Ok(Json(SnapshotResponse {
         row_count,
-        arrow_ipc_b64: all_b64,
+        arrow_ipc_b64,
     }))
 }
 
@@ -190,22 +186,10 @@ pub async fn query_handler(
         .await
         .map_err(ApiError::from)?;
 
-    let mut row_count = 0usize;
-    let mut last_b64 = String::new();
-
-    for batch in &batches {
-        row_count += batch.num_rows();
-        match batch_to_base64_arrow(batch) {
-            Ok(b64) => last_b64 = b64,
-            Err(e) => {
-                error!(target: "hydrocube::web::api", "query serialization error: {e}");
-                return Err(ApiError(e));
-            }
-        }
-    }
+    let (row_count, arrow_ipc_b64) = concat_and_serialize(&batches)?;
 
     Ok(Json(QueryResponse {
         row_count,
-        arrow_ipc_b64: last_b64,
+        arrow_ipc_b64,
     }))
 }

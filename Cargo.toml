@@ -14,7 +14,7 @@ kafka-dynamic = ["kafka", "rdkafka/dynamic-linking"] # System lib — fast build
 # Core
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde_json = { version = "1", features = ["preserve_order"] }
 serde_yaml = "0.9"
 thiserror = "2"
 anyhow = "1"
@@ -25,8 +25,9 @@ clap = { version = "4", features = ["derive"] }
 # DuckDB
 duckdb = { version = "1.2", features = ["bundled"] }
 
-# Arrow — must match the version re-exported by duckdb
+# Arrow — IPC feature required for serialization; version must match duckdb's bundled arrow
 arrow = { version = "58", features = ["ipc"] }
+
 
 # Kafka
 rdkafka = { version = "0.37", optional = true }
@@ -58,6 +59,7 @@ chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4"] }
 async-trait = "0.1"
 futures = "0.3"
+tokio-stream = { version = "0.1", features = ["sync"] }
 mime_guess = "2"
 
 [dev-dependencies]

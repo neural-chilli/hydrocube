@@ -79,7 +79,7 @@ impl LuaTransform {
             .call(lua_input)
             .map_err(|e| HcError::Transform(format!("Lua batch call error: {e}")))?;
 
-        lua_result_to_rows(result)
+        lua_result_to_rows(result, col_names)
     }
 
     /// Call transform(msg) once per message and accumulate results.
@@ -109,7 +109,7 @@ impl LuaTransform {
             let result: LuaValue = func
                 .call(lua_row)
                 .map_err(|e| HcError::Transform(format!("Lua per-message call error: {e}")))?;
-            let mut rows = lua_result_to_rows(result)?;
+            let mut rows = lua_result_to_rows(result, col_names)?;
             output.append(&mut rows);
         }
 
@@ -193,8 +193,11 @@ fn rows_to_lua_table(
 }
 
 /// Convert the Lua return value (array of tables) back to Vec<Vec<Value>>.
-/// The VALUES are extracted in insertion order; keys are not used for ordering.
-fn lua_result_to_rows(result: LuaValue) -> HcResult<Vec<Vec<Value>>> {
+///
+/// Values are extracted by iterating `col_names` in order and looking up each
+/// key in the row table, guaranteeing schema column order regardless of
+/// hash-table iteration order inside Lua.
+fn lua_result_to_rows(result: LuaValue, col_names: &[String]) -> HcResult<Vec<Vec<Value>>> {
     let tbl = match result {
         LuaValue::Table(t) => t,
         LuaValue::Nil => return Ok(vec![]),
@@ -213,13 +216,14 @@ fn lua_result_to_rows(result: LuaValue) -> HcResult<Vec<Vec<Value>>> {
             pair.map_err(|e| HcError::Transform(format!("Lua result iter error: {e}")))?;
         match row_val {
             LuaValue::Table(row_tbl) => {
-                let mut row = Vec::new();
-                // Collect all values from the row table (preserving insertion order via pairs).
-                for pair in row_tbl.pairs::<LuaValue, LuaValue>() {
-                    let (_k, v) =
-                        pair.map_err(|e| HcError::Transform(format!("Lua row iter error: {e}")))?;
-                    row.push(lua_to_json(v));
-                }
+                // Extract values in schema column order by name lookup.
+                let row: Vec<Value> = col_names
+                    .iter()
+                    .map(|name| match row_tbl.get::<mlua::Value>(name.as_str()) {
+                        Ok(v) => lua_to_json(v),
+                        Err(_) => Value::Null,
+                    })
+                    .collect();
                 rows.push(row);
             }
             _ => {

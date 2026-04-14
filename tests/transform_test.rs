@@ -133,6 +133,53 @@ async fn test_sql_transform_null_values() {
 }
 
 // ---------------------------------------------------------------------------
+// SQL transform column-order regression test (Fix 4)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_sql_transform_preserves_column_order() {
+    // Schema: zebra (INTEGER), alpha (INTEGER).
+    // SELECT zebra, alpha means the z column must come first in each output row,
+    // even though alphabetically alpha < zebra.
+    let db = DbManager::open_in_memory().expect("open in-memory DB");
+    let columns = vec![
+        ColumnDef {
+            name: "zebra".to_string(),
+            col_type: "INTEGER".to_string(),
+        },
+        ColumnDef {
+            name: "alpha".to_string(),
+            col_type: "INTEGER".to_string(),
+        },
+    ];
+
+    let input = vec![vec![json!(1), json!(2)]]; // zebra=1, alpha=2
+
+    let transform = SqlTransform::new("SELECT zebra, alpha FROM raw_buffer".to_string());
+    let result = transform
+        .execute(&db, &columns, input)
+        .await
+        .expect("column-order transform should succeed");
+
+    assert_eq!(result.len(), 1, "expected 1 output row");
+    // zebra (value 1) must be first, alpha (value 2) must be second.
+    assert_eq!(
+        result[0][0],
+        json!(1),
+        "first column (zebra) must be 1, got {:?}",
+        result[0]
+    );
+    assert_eq!(
+        result[0][1],
+        json!(2),
+        "second column (alpha) must be 2, got {:?}",
+        result[0]
+    );
+
+    db.shutdown().await;
+}
+
+// ---------------------------------------------------------------------------
 // Lua transform tests
 // ---------------------------------------------------------------------------
 
@@ -251,5 +298,49 @@ end
     assert!(
         result.is_empty(),
         "expected 0 rows when transform_batch returns empty table"
+    );
+}
+
+#[test]
+fn test_lua_column_order_preserved() {
+    let _guard = LUA_LOCK.lock().unwrap();
+
+    // Schema order: ["zebra", "alpha"].
+    // Lua returns {zebra=1, alpha=2}.  The output row must be [1, 2] (zebra
+    // first), NOT [2, 1] (what you'd get from hash-table iteration order).
+    let source = r#"
+function transform_batch(messages)
+    local out = {}
+    for _, msg in ipairs(messages) do
+        table.insert(out, {zebra = msg.zebra, alpha = msg.alpha})
+    end
+    return out
+end
+"#
+    .to_string();
+
+    let col_names = vec!["zebra".to_string(), "alpha".to_string()];
+    let transform = LuaTransform::from_source(source, "transform_batch".to_string(), None)
+        .expect("LuaTransform should load");
+
+    let input = vec![vec![json!(1), json!(2)]]; // zebra=1, alpha=2
+
+    let result = transform
+        .execute_batch(input, &col_names)
+        .expect("batch transform should succeed");
+
+    assert_eq!(result.len(), 1, "expected 1 output row");
+    // zebra must be first (value 1), alpha must be second (value 2).
+    assert_eq!(
+        result[0][0],
+        json!(1),
+        "first column (zebra) must be 1, got {:?}",
+        result[0]
+    );
+    assert_eq!(
+        result[0][1],
+        json!(2),
+        "second column (alpha) must be 2, got {:?}",
+        result[0]
     );
 }

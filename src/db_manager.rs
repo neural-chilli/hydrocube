@@ -12,8 +12,10 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::error::{HcError, HcResult};
 
-// The arrow types exported by the duckdb crate (arrow 58).  We intentionally
-// use `duckdb::arrow` here so we never have a cross-version type mismatch.
+// Re-export the entire arrow crate as it is bundled inside duckdb.  Using
+// `crate::db_manager::arrow` instead of the standalone `arrow` crate ensures
+// there is never a type-version mismatch between the two.
+pub use duckdb::arrow;
 pub use duckdb::arrow::record_batch::RecordBatch;
 
 // ---------------------------------------------------------------------------
@@ -340,7 +342,21 @@ fn value_ref_to_json(vr: duckdb::types::ValueRef<'_>) -> JsonValue {
         }
         ValueRef::Text(bytes) => JsonValue::String(String::from_utf8_lossy(bytes).into_owned()),
         ValueRef::Blob(bytes) => JsonValue::String(String::from_utf8_lossy(bytes).into_owned()),
-        ValueRef::Timestamp(_, i) => JsonValue::Number(i.into()),
+        ValueRef::Timestamp(unit, i) => {
+            use duckdb::types::TimeUnit;
+            let micros = match unit {
+                TimeUnit::Second => i * 1_000_000,
+                TimeUnit::Millisecond => i * 1_000,
+                TimeUnit::Microsecond => i,
+                TimeUnit::Nanosecond => i / 1_000,
+            };
+            let secs = micros / 1_000_000;
+            let nanos = ((micros % 1_000_000) * 1_000) as u32;
+            match chrono::DateTime::from_timestamp(secs, nanos) {
+                Some(dt) => JsonValue::String(dt.to_rfc3339()),
+                None => JsonValue::Number(i.into()), // fallback
+            }
+        }
         // All other complex types are serialised as their debug representation.
         other => JsonValue::String(format!("{other:?}")),
     }

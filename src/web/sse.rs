@@ -1,80 +1,40 @@
 // src/web/sse.rs
 //
 // SSE stream wrapper that fans out DeltaEvents to browser clients.
+// Uses BroadcastStream from tokio-stream to avoid the busy-loop that
+// results from calling wake_by_ref() on TryRecvError::Empty.
 
 use std::convert::Infallible;
-use std::pin::Pin;
-use std::task::{Context, Poll};
 
-use axum::extract::State;
 use axum::response::sse::{Event, Sse};
 use futures::Stream;
 use tokio::sync::broadcast;
-use tracing::warn;
+use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::StreamExt;
 
 use crate::publish::DeltaEvent;
 
-// ---------------------------------------------------------------------------
-// SseStream — wraps a broadcast receiver
-// ---------------------------------------------------------------------------
-
-/// An SSE stream backed by a `tokio::broadcast::Receiver<DeltaEvent>`.
+/// Build an SSE stream from a broadcast receiver.
 ///
-/// Yields one `Event` per `DeltaEvent`, with event-type `"delta"` and the
-/// base64-encoded Arrow IPC payload as the data field.
-pub struct SseStream {
+/// Lagged messages are silently skipped with a warning; a closed channel
+/// terminates the stream.
+pub fn sse_stream(
     rx: broadcast::Receiver<DeltaEvent>,
-}
-
-impl SseStream {
-    pub fn new(rx: broadcast::Receiver<DeltaEvent>) -> Self {
-        Self { rx }
-    }
-}
-
-impl Stream for SseStream {
-    type Item = Result<Event, Infallible>;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        loop {
-            match self.rx.try_recv() {
-                Ok(event) => {
-                    let sse_event = Event::default().event("delta").data(event.base64_arrow);
-                    return Poll::Ready(Some(Ok(sse_event)));
-                }
-                Err(broadcast::error::TryRecvError::Empty) => {
-                    // No messages ready — register the waker so we are polled again
-                    // when the next message arrives.
-                    cx.waker().wake_by_ref();
-                    return Poll::Pending;
-                }
-                Err(broadcast::error::TryRecvError::Lagged(n)) => {
-                    warn!(
-                        target: "hydrocube::web::sse",
-                        skipped = n,
-                        "SSE client lagged; skipped messages"
-                    );
-                    // Continue the loop to consume the next available message.
-                    continue;
-                }
-                Err(broadcast::error::TryRecvError::Closed) => {
-                    // Channel closed — signal end of stream.
-                    return Poll::Ready(None);
-                }
-            }
+) -> impl Stream<Item = Result<Event, Infallible>> {
+    BroadcastStream::new(rx).filter_map(|result| match result {
+        Ok(event) => Some(Ok(Event::default().event("delta").data(event.base64_arrow))),
+        Err(_) => {
+            tracing::warn!(target: "sse", "SSE client lagged, skipping events");
+            None
         }
-    }
+    })
 }
-
-// ---------------------------------------------------------------------------
-// axum handler
-// ---------------------------------------------------------------------------
 
 /// axum handler: subscribe a new client to the broadcast channel and return
 /// an SSE response.
 pub async fn sse_handler(
-    State(broadcast_tx): State<broadcast::Sender<DeltaEvent>>,
-) -> Sse<SseStream> {
+    axum::extract::State(broadcast_tx): axum::extract::State<broadcast::Sender<DeltaEvent>>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let rx = broadcast_tx.subscribe();
-    Sse::new(SseStream::new(rx))
+    Sse::new(sse_stream(rx))
 }
