@@ -13,5 +13,6 @@ pub mod ingest;
 pub mod persistence;
 pub mod publish;
 pub mod retention;
+pub mod shutdown;
 pub mod transform;
 pub mod web;
