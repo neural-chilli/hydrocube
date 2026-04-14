@@ -1,5 +1,6 @@
 // src/main.rs
 pub mod aggregation;
+pub mod auth;
 pub mod cli;
 pub mod compaction;
 pub mod config;

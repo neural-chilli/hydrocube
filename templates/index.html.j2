@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="flatly">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HydroCube — {{ cube_name }}</title>
+
+    <!-- Bootswatch theme — swapped by JS -->
+    <link id="theme-css" rel="stylesheet" href="/assets/bootswatch/flatly.min.css">
+    <link rel="stylesheet" href="/assets/codemirror/codemirror.min.css">
+
+    <style>
+        body { padding-top: 56px; }
+        #perspective-viewer {
+            width: 100%;
+            min-height: 400px;
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #6c757d;
+            font-style: italic;
+        }
+        #perspective-viewer.dark-bg {
+            background: #2c3e50;
+            border-color: #495057;
+            color: #adb5bd;
+        }
+        .CodeMirror {
+            height: 120px;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+        #query-result { display: none; }
+        #status-bar {
+            font-size: 0.85rem;
+            padding: 4px 0;
+        }
+        .sse-dot {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #dc3545;
+            margin-right: 4px;
+            vertical-align: middle;
+        }
+        .sse-dot.connected { background: #28a745; }
+    </style>
+</head>
+<body>
+
+<!-- =====================================================================
+     Nav bar
+===================================================================== -->
+<nav class="navbar navbar-expand-lg navbar-dark bg-primary fixed-top">
+    <div class="container-fluid">
+        <a class="navbar-brand fw-bold" href="#">HydroCube — {{ cube_name }}</a>
+        <div class="ms-auto d-flex align-items-center gap-3">
+            <span id="rate-display" class="text-white small">0 deltas/sec</span>
+            <span class="text-white small">
+                <span class="sse-dot" id="sse-dot"></span>
+                <span id="sse-status">Disconnected</span>
+            </span>
+            <button id="theme-toggle" class="btn btn-sm btn-outline-light">
+                Dark Mode
+            </button>
+        </div>
+    </div>
+</nav>
+
+<!-- =====================================================================
+     Main content
+===================================================================== -->
+<div class="container-fluid mt-3">
+
+    <!-- Perspective pivot table placeholder -->
+    <div class="row mb-3">
+        <div class="col-12">
+            <div id="perspective-viewer">
+                <div class="text-center">
+                    <p class="mb-1">Perspective WASM viewer</p>
+                    <p class="small mb-0">TODO: load @finos/perspective when vendor.sh includes it</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- SQL query panel -->
+    <div class="row mb-3">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span class="fw-semibold">SQL Query</span>
+                    <button id="run-query-btn" class="btn btn-sm btn-primary">Run</button>
+                </div>
+                <div class="card-body p-2">
+                    <textarea id="sql-editor">SELECT * FROM agg LIMIT 100</textarea>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Query result -->
+    <div id="query-result" class="row mb-3">
+        <div class="col-12">
+            <div class="card border-info">
+                <div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
+                    <span class="fw-semibold">Query Result</span>
+                    <span id="query-row-count" class="small">0 rows</span>
+                </div>
+                <div class="card-body p-2">
+                    <div id="query-result-content" class="small font-monospace text-muted">
+                        (results appear here)
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Status bar -->
+    <div id="status-bar" class="row">
+        <div class="col-12 text-muted d-flex gap-4">
+            <span>Window: <strong id="stat-window-id">—</strong></span>
+            <span>Cutoff: <strong id="stat-cutoff">—</strong></span>
+            <span>SSE clients: <strong id="stat-sse-clients">—</strong></span>
+            <span>Uptime: <strong id="stat-uptime">—</strong></span>
+        </div>
+    </div>
+
+</div>
+
+<!-- =====================================================================
+     Scripts
+===================================================================== -->
+<script src="/assets/bootstrap/bootstrap.bundle.min.js"></script>
+<script src="/assets/codemirror/codemirror.min.js"></script>
+<script src="/assets/codemirror/sql.min.js"></script>
+
+<script>
+(function () {
+    'use strict';
+
+    // ------------------------------------------------------------------
+    // Theme toggle
+    // ------------------------------------------------------------------
+    const THEME_KEY = 'hc_theme';
+    const THEMES = {
+        light: '/assets/bootswatch/flatly.min.css',
+        dark:  '/assets/bootswatch/darkly.min.css',
+    };
+
+    function applyTheme(theme) {
+        document.getElementById('theme-css').href = THEMES[theme] || THEMES.light;
+        document.getElementById('theme-toggle').textContent =
+            theme === 'dark' ? 'Light Mode' : 'Dark Mode';
+        document.documentElement.setAttribute('data-theme', theme);
+        const pv = document.getElementById('perspective-viewer');
+        if (theme === 'dark') {
+            pv.classList.add('dark-bg');
+        } else {
+            pv.classList.remove('dark-bg');
+        }
+        localStorage.setItem(THEME_KEY, theme);
+    }
+
+    const savedTheme = localStorage.getItem(THEME_KEY) || 'light';
+    applyTheme(savedTheme);
+
+    document.getElementById('theme-toggle').addEventListener('click', function () {
+        const current = localStorage.getItem(THEME_KEY) || 'light';
+        applyTheme(current === 'dark' ? 'light' : 'dark');
+    });
+
+    // ------------------------------------------------------------------
+    // CodeMirror SQL editor
+    // ------------------------------------------------------------------
+    let editor;
+    if (typeof CodeMirror !== 'undefined') {
+        editor = CodeMirror.fromTextArea(document.getElementById('sql-editor'), {
+            mode: 'text/x-sql',
+            lineNumbers: true,
+            tabSize: 2,
+            indentWithTabs: false,
+        });
+    }
+
+    function getSql() {
+        return editor ? editor.getValue() : document.getElementById('sql-editor').value;
+    }
+
+    // ------------------------------------------------------------------
+    // Delta rate counter
+    // ------------------------------------------------------------------
+    let deltaCount = 0;
+    let deltaWindow = [];
+
+    function recordDelta() {
+        const now = Date.now();
+        deltaWindow.push(now);
+        // Keep only the last second
+        deltaWindow = deltaWindow.filter(t => now - t < 1000);
+        deltaCount++;
+    }
+
+    setInterval(function () {
+        const now = Date.now();
+        deltaWindow = deltaWindow.filter(t => now - t < 1000);
+        document.getElementById('rate-display').textContent = deltaWindow.length + ' deltas/sec';
+    }, 500);
+
+    // ------------------------------------------------------------------
+    // SSE connection
+    // ------------------------------------------------------------------
+    const dot = document.getElementById('sse-dot');
+    const sseStatus = document.getElementById('sse-status');
+
+    function connectSSE() {
+        const es = new EventSource('/api/stream');
+
+        es.addEventListener('delta', function (e) {
+            recordDelta();
+            // TODO: push e.data (base64 Arrow IPC) into Perspective viewer
+        });
+
+        es.onopen = function () {
+            dot.classList.add('connected');
+            sseStatus.textContent = 'Connected';
+        };
+
+        es.onerror = function () {
+            dot.classList.remove('connected');
+            sseStatus.textContent = 'Reconnecting…';
+            es.close();
+            setTimeout(connectSSE, 3000);
+        };
+    }
+
+    connectSSE();
+
+    // ------------------------------------------------------------------
+    // Load snapshot on page load
+    // ------------------------------------------------------------------
+    fetch('/api/snapshot')
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+            // TODO: load data.arrow_ipc_b64 into Perspective viewer
+            console.log('[HydroCube] snapshot loaded', data.row_count, 'rows');
+        })
+        .catch(function (err) {
+            console.warn('[HydroCube] snapshot load failed:', err);
+        });
+
+    // ------------------------------------------------------------------
+    // Status polling (every 5 s)
+    // ------------------------------------------------------------------
+    function pollStatus() {
+        fetch('/api/status')
+            .then(function (r) { return r.json(); })
+            .then(function (s) {
+                document.getElementById('stat-window-id').textContent = s.window_id;
+                document.getElementById('stat-cutoff').textContent = s.compaction_cutoff;
+                document.getElementById('stat-sse-clients').textContent = s.sse_client_count;
+                document.getElementById('stat-uptime').textContent = s.uptime_secs + 's';
+            })
+            .catch(function () {});
+    }
+
+    pollStatus();
+    setInterval(pollStatus, 5000);
+
+    // ------------------------------------------------------------------
+    // Ad-hoc query execution
+    // ------------------------------------------------------------------
+    document.getElementById('run-query-btn').addEventListener('click', function () {
+        const sql = getSql().trim();
+        if (!sql) return;
+
+        const btn = this;
+        btn.disabled = true;
+        btn.textContent = 'Running…';
+
+        fetch('/api/query', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sql: sql }),
+        })
+            .then(function (r) {
+                if (!r.ok) {
+                    return r.json().then(function (e) {
+                        throw new Error(e.error || r.statusText);
+                    });
+                }
+                return r.json();
+            })
+            .then(function (data) {
+                document.getElementById('query-result').style.display = '';
+                document.getElementById('query-row-count').textContent = data.row_count + ' rows';
+                document.getElementById('query-result-content').textContent =
+                    'Arrow IPC (base64) — ' + data.row_count + ' rows returned. ' +
+                    'TODO: render via Perspective once WASM is vendored.';
+            })
+            .catch(function (err) {
+                document.getElementById('query-result').style.display = '';
+                document.getElementById('query-row-count').textContent = 'Error';
+                document.getElementById('query-result-content').textContent =
+                    'Error: ' + err.message;
+            })
+            .finally(function () {
+                btn.disabled = false;
+                btn.textContent = 'Run';
+            });
+    });
+
+})();
+</script>
+</body>
+</html>
