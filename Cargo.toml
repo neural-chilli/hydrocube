@@ -25,9 +25,10 @@ clap = { version = "4", features = ["derive"] }
 # DuckDB
 duckdb = { version = "1.2", features = ["bundled"] }
 
-# Arrow — IPC feature required for serialization; version must match duckdb's bundled arrow
-arrow = { version = "58", features = ["ipc"] }
 
+# Arrow IPC writer — duckdb re-exports arrow core types but not the IPC module.
+# Version must match duckdb's bundled arrow to avoid type mismatches.
+arrow-ipc = { version = "58", features = ["default"] }
 
 # Kafka
 rdkafka = { version = "0.37", optional = true }

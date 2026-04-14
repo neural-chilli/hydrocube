@@ -41,7 +41,12 @@ pub async fn run_hot_path(
     let agg_gen = AggSqlGenerator::from_user_sql(&config.aggregation.sql)?;
     let dimension_names: Vec<String> = agg_gen.dimensions().iter().map(|d| d.to_string()).collect();
     let mut detector = DeltaDetector::new(dimension_names);
-    let agg_sql_template = agg_gen.slice_aggregation_sql(); // contains "$cutoff"
+
+    // Use the user's original aggregation SQL (queries all retained slices).
+    // The slice_aggregation_sql() with cutoff filter is only correct once
+    // compaction rebuilds the consolidated table — until then, we need to
+    // scan all slices to avoid losing data after compaction deletes old rows.
+    let agg_sql = agg_gen.full_aggregation_sql();
 
     let pipeline = config
         .transform
@@ -90,10 +95,8 @@ pub async fn run_hot_path(
                 let insert_sql = build_insert_sql(&config.schema.columns, &rows, window_id);
                 db.execute(insert_sql, vec![]).await?;
 
-                // Aggregate from slices above compaction cutoff
-                let cutoff = window::compaction_cutoff();
-                let agg_sql = agg_sql_template.replace("$cutoff", &cutoff.to_string());
-                let batches = db.query_arrow(agg_sql).await?;
+                // Aggregate all retained slices
+                let batches = db.query_arrow(agg_sql.clone()).await?;
 
                 if !batches.is_empty() {
                     let (upserts, _deletes) = detector.detect(&batches[0]);
@@ -119,7 +122,9 @@ pub async fn run_hot_path(
 
                 // Persist window ID periodically
                 flush_counter += 1;
-                if flush_counter.is_multiple_of(config.persistence.flush_interval) {
+                let interval = config.persistence.flush_interval;
+                #[allow(clippy::manual_is_multiple_of)]
+                if interval > 0 && flush_counter % interval == 0 {
                     let _ = persistence::save_window_id(&db, window_id).await;
                 }
             }

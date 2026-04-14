@@ -5,10 +5,11 @@
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine as _;
 
-// Use arrow re-exported from duckdb so the RecordBatch type is always the same
-// instance as the one the DB manager produces — no cross-version type mismatch.
-use crate::db_manager::arrow::ipc::writer::StreamWriter;
+// RecordBatch from duckdb's re-exported arrow — same type as db_manager produces.
 use crate::db_manager::arrow::record_batch::RecordBatch;
+// IPC writer from the arrow-ipc crate (duckdb doesn't re-export arrow_ipc).
+// Version is pinned to match duckdb's bundled arrow to avoid type mismatches.
+use arrow_ipc::writer::StreamWriter;
 
 use crate::config::NatsPublishConfig;
 use crate::error::{HcError, HcResult};
