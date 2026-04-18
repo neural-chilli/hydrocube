@@ -10,6 +10,7 @@
 BOOTSTRAP_VERSION="5.3.3"
 BOOTSWATCH_VERSION="5.3.3"
 CODEMIRROR_VERSION="5.65.18"
+PERSPECTIVE_VERSION="3.8.0"   # user confirmed latest is 4.4.1 but 3.8.0 has full CDN build
 
 set -euo pipefail
 
@@ -69,22 +70,49 @@ download \
     "$STATIC_DIR/codemirror/sql.min.js"
 
 # ── Perspective WASM ─────────────────────────────────────────────────────────
-# TODO: vendor @finos/perspective WASM assets.
+# The CDN JS files use `new URL("../wasm/...", import.meta.url)` to locate WASM
+# binaries, so we must preserve the cdn/ and wasm/ subdirectory structure from
+# the npm packages exactly.  The CSS themes live under css/.
 #
-# Perspective's build output includes several large .wasm files and a
-# JavaScript loader that must be served from the same origin.  The canonical
-# approach is:
-#
-#   npm pack @finos/perspective@<version>
-#   npm pack @finos/perspective-viewer@<version>
-#   npm pack @finos/perspective-viewer-datagrid@<version>
-#
-# Then copy the dist/ tree into static/perspective/.  Because these packages
-# are 10–30 MB each, they are excluded from version control (.gitignore) and
-# must be fetched by this script or a CI step.
-echo ""
-echo "NOTE: Perspective WASM assets are NOT vendored yet."
-echo "      See the TODO comment in this script for instructions."
+# Total download: ~15–20 MB (WASM binaries dominate).
+# These files are gitignored and must be fetched by this script or a CI step.
+
+echo "==> @finos/perspective $PERSPECTIVE_VERSION (WASM — may take a moment)"
+mkdir -p "$STATIC_DIR/perspective/cdn"
+mkdir -p "$STATIC_DIR/perspective/wasm"
+mkdir -p "$STATIC_DIR/perspective/css"
+
+PSP_BASE="https://cdn.jsdelivr.net/npm/@finos/perspective@${PERSPECTIVE_VERSION}"
+download "${PSP_BASE}/dist/cdn/perspective.js" \
+         "$STATIC_DIR/perspective/cdn/perspective.js"
+download "${PSP_BASE}/dist/cdn/perspective-server.worker.js" \
+         "$STATIC_DIR/perspective/cdn/perspective-server.worker.js"
+download "${PSP_BASE}/dist/wasm/perspective-server.wasm" \
+         "$STATIC_DIR/perspective/wasm/perspective-server.wasm"
+
+PSP_V_BASE="https://cdn.jsdelivr.net/npm/@finos/perspective-viewer@${PERSPECTIVE_VERSION}"
+download "${PSP_V_BASE}/dist/cdn/perspective-viewer.js" \
+         "$STATIC_DIR/perspective/cdn/perspective-viewer.js"
+download "${PSP_V_BASE}/dist/wasm/perspective-viewer.wasm" \
+         "$STATIC_DIR/perspective/wasm/perspective-viewer.wasm"
+# Themes: "Pro Light" and "Pro Dark" match our Flatly/Darkly UI themes
+download "${PSP_V_BASE}/dist/css/themes.css" \
+         "$STATIC_DIR/perspective/css/themes.css"
+download "${PSP_V_BASE}/dist/css/pro.css" \
+         "$STATIC_DIR/perspective/css/pro.css"
+download "${PSP_V_BASE}/dist/css/pro-dark.css" \
+         "$STATIC_DIR/perspective/css/pro-dark.css"
+download "${PSP_V_BASE}/dist/css/icons.css" \
+         "$STATIC_DIR/perspective/css/icons.css"
+
+PSP_DG_BASE="https://cdn.jsdelivr.net/npm/@finos/perspective-viewer-datagrid@${PERSPECTIVE_VERSION}"
+download "${PSP_DG_BASE}/dist/cdn/perspective-viewer-datagrid.js" \
+         "$STATIC_DIR/perspective/cdn/perspective-viewer-datagrid.js"
 
 echo ""
 echo "Done. All assets written to $STATIC_DIR/"
+echo ""
+du -sh "$STATIC_DIR"/bootstrap "$STATIC_DIR"/bootswatch \
+       "$STATIC_DIR"/codemirror "$STATIC_DIR"/perspective 2>/dev/null || true
+echo ""
+echo "Next: cargo build   (rust-embed will pick up the new files)"

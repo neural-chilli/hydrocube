@@ -1,321 +1,629 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="flatly">
+<html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HydroCube — {{ cube_name }}</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HydroCube — {{ cube_name }}</title>
 
-    <!-- Bootswatch theme — swapped by JS -->
-    <link id="theme-css" rel="stylesheet" href="/assets/bootswatch/flatly.min.css">
-    <link rel="stylesheet" href="/assets/codemirror/codemirror.min.css">
+  <!-- Bootswatch theme (swapped by JS) -->
+  <link id="theme-css" rel="stylesheet" href="/assets/bootswatch/flatly.min.css">
+  <!-- Perspective viewer CSS — "Pro Light" and "Pro Dark" themes -->
+  <link id="psp-theme-css" rel="stylesheet" href="/assets/perspective/css/pro.css">
+  <link rel="stylesheet" href="/assets/perspective/css/icons.css">
+  <!-- CodeMirror (SQL modal) -->
+  <link rel="stylesheet" href="/assets/codemirror/codemirror.min.css">
 
-    <style>
-        body { padding-top: 56px; }
-        #perspective-viewer {
-            width: 100%;
-            min-height: 400px;
-            background: #f8f9fa;
-            border: 1px solid #dee2e6;
-            border-radius: 4px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #6c757d;
-            font-style: italic;
-        }
-        #perspective-viewer.dark-bg {
-            background: #2c3e50;
-            border-color: #495057;
-            color: #adb5bd;
-        }
-        .CodeMirror {
-            height: 120px;
-            border: 1px solid #ced4da;
-            border-radius: 4px;
-            font-size: 13px;
-        }
-        #query-result { display: none; }
-        #status-bar {
-            font-size: 0.85rem;
-            padding: 4px 0;
-        }
-        .sse-dot {
-            display: inline-block;
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            background: #dc3545;
-            margin-right: 4px;
-            vertical-align: middle;
-        }
-        .sse-dot.connected { background: #28a745; }
-    </style>
+  <style>
+    /* ── Full-height flex column layout ─────────────────────────────────── */
+    html, body {
+      height: 100%;
+      margin: 0;
+      overflow: hidden;         /* no page scroll — Perspective scrolls inside */
+    }
+    body {
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Navbar ──────────────────────────────────────────────────────────── */
+    #top-nav {
+      flex: 0 0 auto;
+      height: 48px;
+      background-color: #3d5a78 !important;
+      border-bottom: 1px solid #2e4560;
+      display: flex;
+      align-items: center;
+      padding: 0 12px;
+      gap: 8px;
+      z-index: 1030;
+    }
+
+    /* Ghost buttons for the nav — white-on-blue-grey */
+    .nav-btn {
+      color: rgba(255,255,255,.88);
+      border: 1px solid rgba(255,255,255,.28);
+      background: transparent;
+      border-radius: 4px;
+      padding: 3px 10px;
+      font-size: .82rem;
+      cursor: pointer;
+      white-space: nowrap;
+      line-height: 1.4;
+    }
+    .nav-btn:hover    { background: rgba(255,255,255,.13); }
+    .nav-btn:active   { background: rgba(255,255,255,.20); }
+
+    /* Dropdowns inherit Bootstrap theming; just force text colour in nav */
+    #top-nav .dropdown-toggle { display: flex; align-items: center; gap: 5px; }
+    #top-nav .dropdown-menu   { color: var(--bs-body-color); }
+
+    #nav-brand {
+      color: rgba(255,255,255,.92);
+      font-weight: 700;
+      font-size: 1rem;
+      letter-spacing: .01em;
+      white-space: nowrap;
+    }
+    #nav-spacer { flex: 1 1 auto; }
+
+    /* ── Perspective wrapper (fills all remaining vertical space) ─────────── */
+    #perspective-wrapper {
+      flex: 1 1 auto;
+      position: relative;
+      overflow: hidden;
+      min-height: 0;            /* critical for flex shrink */
+    }
+
+    perspective-viewer {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    /* Loading overlay — shown until first snapshot loads */
+    #psp-loading {
+      position: absolute;
+      inset: 0;
+      z-index: 5;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      background: var(--bs-body-bg, #fff);
+      color: var(--bs-secondary-color, #6c757d);
+      font-style: italic;
+      transition: opacity .3s;
+    }
+    #psp-loading.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .psp-spinner {
+      width: 34px;
+      height: 34px;
+      border: 3px solid rgba(61,90,120,.18);
+      border-top-color: #3d5a78;
+      border-radius: 50%;
+      animation: hc-spin .85s linear infinite;
+    }
+    @keyframes hc-spin { to { transform: rotate(360deg); } }
+
+    /* Zoom/fullscreen button — floats top-right of the Perspective pane */
+    #zoom-btn {
+      position: absolute;
+      top: 10px;
+      right: 14px;
+      z-index: 10;
+      opacity: .65;
+      transition: opacity .15s;
+    }
+    #zoom-btn:hover { opacity: 1; }
+
+    /* ── Status strip ────────────────────────────────────────────────────── */
+    #status-strip {
+      flex: 0 0 auto;
+      height: 26px;
+      background: #3d5a78;
+      border-top: 1px solid #2e4560;
+      color: rgba(255,255,255,.68);
+      font-size: .76rem;
+      padding: 0 16px;
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      overflow: hidden;
+    }
+    #status-strip strong { color: rgba(255,255,255,.92); }
+
+    .sse-dot {
+      display: inline-block;
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #ff6b6b;
+      vertical-align: middle;
+      margin-right: 4px;
+      animation: hc-pulse 1.8s ease-in-out infinite;
+    }
+    .sse-dot.connected {
+      background: #51cf66;
+      animation: none;
+    }
+    @keyframes hc-pulse {
+      0%, 100% { opacity: 1;  }
+      50%       { opacity: .3; }
+    }
+
+    /* ── Alerts panel (slides in from right, fixed, never takes main space) */
+    #alerts-panel {
+      position: fixed;
+      top: 48px;
+      right: 0;
+      width: 360px;
+      max-height: calc(100vh - 48px - 26px);
+      overflow-y: auto;
+      z-index: 1025;
+      box-shadow: -4px 0 20px rgba(0,0,0,.18);
+      display: none;
+    }
+    #alerts-panel.show { display: block; }
+
+    /* ── CodeMirror in modal ──────────────────────────────────────────────── */
+    .CodeMirror {
+      height: 140px;
+      font-size: 13px;
+      font-family: 'SFMono-Regular', Menlo, monospace;
+    }
+  </style>
 </head>
 <body>
 
-<!-- =====================================================================
-     Nav bar
-===================================================================== -->
-<nav class="navbar navbar-expand-lg navbar-dark bg-primary fixed-top">
-    <div class="container-fluid">
-        <a class="navbar-brand fw-bold" href="#">HydroCube — {{ cube_name }}</a>
-        <div class="ms-auto d-flex align-items-center gap-3">
-            <span id="rate-display" class="text-white small">0 deltas/sec</span>
-            <span class="text-white small">
-                <span class="sse-dot" id="sse-dot"></span>
-                <span id="sse-status">Disconnected</span>
-            </span>
-            <button id="theme-toggle" class="btn btn-sm btn-outline-light">
-                Dark Mode
-            </button>
-        </div>
-    </div>
+<!-- ═══════════════════════════════════════════════════════════════ Navbar -->
+<nav id="top-nav">
+
+  <!-- Logo + brand name -->
+  <img src="/assets/images/hydrocube-logo.webp" alt="" height="26"
+       style="border-radius:5px; flex-shrink:0"
+       onerror="this.style.display='none'">
+  <span id="nav-brand">HydroCube</span>
+
+  <!-- Cube selector -->
+  <div class="dropdown ms-1">
+    <button class="nav-btn dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+      ⬡ {{ cube_name }}
+    </button>
+    <ul class="dropdown-menu shadow-sm">
+      <li><a class="dropdown-item active" href="#">{{ cube_name }}</a></li>
+      <li><hr class="dropdown-divider"></li>
+      <li><a class="dropdown-item text-muted" href="#"><em>Connect to another cube…</em></a></li>
+    </ul>
+  </div>
+
+  <!-- Saved views -->
+  <div class="dropdown">
+    <button class="nav-btn dropdown-toggle" id="views-toggle-btn"
+            data-bs-toggle="dropdown" aria-expanded="false">
+      📋 <span id="current-view-label">Default View</span>
+    </button>
+    <ul class="dropdown-menu shadow-sm" id="views-menu">
+      <li><a class="dropdown-item active" href="#" data-view="default">Default View</a></li>
+      <li><hr class="dropdown-divider"></li>
+      <li><a class="dropdown-item" href="#" id="save-view-btn"><em>Save current view…</em></a></li>
+    </ul>
+  </div>
+
+  <div id="nav-spacer"></div>
+
+  <!-- SQL modal trigger -->
+  <button class="nav-btn" data-bs-toggle="modal" data-bs-target="#sql-modal"
+          title="Ad-hoc SQL query (runs against agg / slices tables)">
+    SQL
+  </button>
+
+  <!-- Light / dark toggle -->
+  <button class="nav-btn" id="theme-btn" title="Toggle light/dark theme">🌙</button>
+
+  <!-- Alerts bell with badge -->
+  <div style="position:relative">
+    <button class="nav-btn" id="alerts-toggle" title="View alerts">🔔</button>
+    <span id="alert-badge"
+          class="position-absolute badge rounded-pill bg-danger"
+          style="top:-5px;right:-5px;font-size:.6rem;min-width:16px;display:none">0</span>
+  </div>
+
 </nav>
 
-<!-- =====================================================================
-     Main content
-===================================================================== -->
-<div class="container-fluid mt-3">
 
-    <!-- Perspective pivot table placeholder -->
-    <div class="row mb-3">
-        <div class="col-12">
-            <div id="perspective-viewer">
-                <div class="text-center">
-                    <p class="mb-1">Perspective WASM viewer</p>
-                    <p class="small mb-0">TODO: load @finos/perspective when vendor.sh includes it</p>
-                </div>
-            </div>
-        </div>
-    </div>
+<!-- ═══════════════════════════════════════════════════ Perspective pane -->
+<div id="perspective-wrapper">
 
-    <!-- SQL query panel -->
-    <div class="row mb-3">
-        <div class="col-12">
-            <div class="card">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <span class="fw-semibold">SQL Query</span>
-                    <button id="run-query-btn" class="btn btn-sm btn-primary">Run</button>
-                </div>
-                <div class="card-body p-2">
-                    <textarea id="sql-editor">SELECT * FROM agg LIMIT 100</textarea>
-                </div>
-            </div>
-        </div>
-    </div>
+  <!-- Spinner shown until first data arrives -->
+  <div id="psp-loading">
+    <div class="psp-spinner"></div>
+    <div>Connecting to HydroCube…</div>
+  </div>
 
-    <!-- Query result -->
-    <div id="query-result" class="row mb-3">
-        <div class="col-12">
-            <div class="card border-info">
-                <div class="card-header bg-info text-white d-flex justify-content-between align-items-center">
-                    <span class="fw-semibold">Query Result</span>
-                    <span id="query-row-count" class="small">0 rows</span>
-                </div>
-                <div class="card-body p-2">
-                    <div id="query-result-content" class="small font-monospace text-muted">
-                        (results appear here)
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
+  <!-- Fullscreen / zoom toggle -->
+  <button id="zoom-btn" class="btn btn-sm btn-secondary">⛶ Zoom</button>
 
-    <!-- Status bar -->
-    <div id="status-bar" class="row">
-        <div class="col-12 text-muted d-flex gap-4">
-            <span>Window: <strong id="stat-window-id">—</strong></span>
-            <span>Cutoff: <strong id="stat-cutoff">—</strong></span>
-            <span>SSE clients: <strong id="stat-sse-clients">—</strong></span>
-            <span>Uptime: <strong id="stat-uptime">—</strong></span>
-        </div>
-    </div>
+  <!-- The Perspective custom element — fills the wrapper entirely -->
+  <perspective-viewer id="perspective-viewer" theme="Pro Light"></perspective-viewer>
 
 </div>
 
-<!-- =====================================================================
-     Scripts
-===================================================================== -->
+
+<!-- ═══════════════════════════════════════════════════ Status strip -->
+<div id="status-strip">
+  <span>
+    <span class="sse-dot" id="sse-dot"></span>
+    <span id="sse-label">Connecting…</span>
+  </span>
+  <span>Window: <strong id="stat-window">—</strong></span>
+  <span>Rate: <strong id="stat-rate">0 Δ/s</strong></span>
+  <span>Cutoff: <strong id="stat-cutoff">—</strong></span>
+  <span class="ms-auto">Clients: <strong id="stat-clients">—</strong></span>
+  <span>Uptime: <strong id="stat-uptime">—</strong></span>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════ Alerts panel -->
+<div id="alerts-panel" class="card border-0 rounded-0">
+  <div class="card-header d-flex justify-content-between align-items-center py-2">
+    <span class="fw-semibold">🔔 Alerts</span>
+    <button class="btn btn-sm btn-outline-secondary" id="alerts-close">✕</button>
+  </div>
+
+  <!-- Active alerts (populated by alert-polling JS; placeholder until wired up) -->
+  <div id="alerts-active" class="card-body border-bottom py-2" style="display:none">
+    <div class="fw-semibold small mb-2 text-danger">Active</div>
+    <div id="alerts-active-list" class="d-flex flex-column gap-2"></div>
+  </div>
+
+  <!-- History -->
+  <div id="alerts-history" class="card-body py-3 text-center text-muted small fst-italic">
+    No alerts.
+  </div>
+  <div class="card-footer py-1 small text-center">
+    <a href="#" class="text-muted">Configure alert rules…</a>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════ SQL Modal -->
+<div class="modal fade" id="sql-modal" tabindex="-1" aria-labelledby="sql-modal-label">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content">
+
+      <div class="modal-header py-2">
+        <h6 class="modal-title fw-semibold" id="sql-modal-label">Ad-hoc SQL Query</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+
+      <div class="modal-body pb-2">
+        <textarea id="sql-editor" class="form-control font-monospace" rows="5"
+                  style="font-size:.84rem; resize:vertical">SELECT * FROM agg LIMIT 100</textarea>
+        <div class="text-muted small mt-1">
+          Tables: <code>agg</code> (current aggregated view) ·
+                  <code>slices</code> (raw per-window data)
+        </div>
+      </div>
+
+      <div class="modal-footer py-2 d-flex justify-content-between align-items-center gap-2">
+        <span id="sql-meta" class="small text-muted"></span>
+        <div class="d-flex gap-2">
+          <button class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button class="btn btn-sm btn-primary" id="run-query-btn">▶ Run</button>
+        </div>
+      </div>
+
+      <!-- Result area — hidden until a query runs -->
+      <div id="sql-result"
+           class="border-top font-monospace small px-3 py-2"
+           style="display:none; max-height:280px; overflow-y:auto">
+      </div>
+
+    </div>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════════════ Scripts -->
 <script src="/assets/bootstrap/bootstrap.bundle.min.js"></script>
 <script src="/assets/codemirror/codemirror.min.js"></script>
 <script src="/assets/codemirror/sql.min.js"></script>
 
-<script>
-(function () {
-    'use strict';
+<!--
+  Perspective is loaded as an ES module. The imports register:
+    - perspective              : core WASM engine + table API
+    - perspective-viewer       : <perspective-viewer> custom element
+    - perspective-viewer-datagrid : the real-time data grid plugin
+-->
+<script type="module">
+import perspective from '/assets/perspective/cdn/perspective.js';
+import '/assets/perspective/cdn/perspective-viewer.js';
+import '/assets/perspective/cdn/perspective-viewer-datagrid.js';
 
-    // ------------------------------------------------------------------
-    // Theme toggle
-    // ------------------------------------------------------------------
-    const THEME_KEY = 'hc_theme';
-    const THEMES = {
-        light: '/assets/bootswatch/flatly.min.css',
-        dark:  '/assets/bootswatch/darkly.min.css',
-    };
+// ── Theme ─────────────────────────────────────────────────────────────────────
+const THEMES = {
+  light: '/assets/bootswatch/flatly.min.css',
+  dark:  '/assets/bootswatch/darkly.min.css',
+};
+let currentTheme = localStorage.getItem('hc_theme') || 'light';
 
-    function applyTheme(theme) {
-        document.getElementById('theme-css').href = THEMES[theme] || THEMES.light;
-        document.getElementById('theme-toggle').textContent =
-            theme === 'dark' ? 'Light Mode' : 'Dark Mode';
-        document.documentElement.setAttribute('data-theme', theme);
-        const pv = document.getElementById('perspective-viewer');
-        if (theme === 'dark') {
-            pv.classList.add('dark-bg');
-        } else {
-            pv.classList.remove('dark-bg');
-        }
-        localStorage.setItem(THEME_KEY, theme);
+const PSP_CSS = {
+  light: '/assets/perspective/css/pro.css',
+  dark:  '/assets/perspective/css/pro-dark.css',
+};
+
+function applyTheme(t) {
+  document.getElementById('theme-css').href = THEMES[t] ?? THEMES.light;
+  document.getElementById('psp-theme-css').href = PSP_CSS[t] ?? PSP_CSS.light;
+  document.documentElement.setAttribute('data-bs-theme', t);
+  document.getElementById('theme-btn').textContent = t === 'dark' ? '☀️' : '🌙';
+  const viewer = document.getElementById('perspective-viewer');
+  if (viewer) viewer.setAttribute('theme', t === 'dark' ? 'Pro Dark' : 'Pro Light');
+  currentTheme = t;
+  localStorage.setItem('hc_theme', t);
+}
+
+applyTheme(currentTheme);
+document.getElementById('theme-btn').addEventListener('click', () =>
+  applyTheme(currentTheme === 'dark' ? 'light' : 'dark'));
+
+
+// ── Perspective init ───────────────────────────────────────────────────────────
+const viewerEl  = document.getElementById('perspective-viewer');
+const pspLoading = document.getElementById('psp-loading');
+
+let worker = null;
+let table  = null;
+
+// Decode a base64 string to an ArrayBuffer (Arrow IPC format).
+function b64ToBuffer(b64) {
+  const raw = atob(b64);
+  const buf = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) buf[i] = raw.charCodeAt(i);
+  return buf.buffer;
+}
+
+// Load (or replace) the Perspective table from the /api/snapshot endpoint.
+// Called on startup and after each SSE delta event.
+async function loadSnapshot() {
+  try {
+    const resp = await fetch('/api/snapshot');
+    if (!resp.ok) return;
+    const data = await resp.json();
+    if (!data.arrow_ipc_b64 || data.row_count === 0) return;
+
+    const buf = b64ToBuffer(data.arrow_ipc_b64);
+
+    if (!table) {
+      // First load — create the worker + table, attach to the viewer.
+      worker = await perspective.worker();
+      table  = await worker.table(buf);
+      await viewerEl.load(table);
+      pspLoading.classList.add('hidden');
+    } else {
+      // Subsequent updates — replace all rows (full aggregated state).
+      await table.replace(buf);
     }
+  } catch (err) {
+    console.warn('[HydroCube] snapshot error:', err);
+    // Show error in loading overlay instead of a blank screen.
+    if (!table) {
+      pspLoading.innerHTML =
+        `<div class="text-danger small px-4 text-center">
+           Failed to load Perspective: ${err.message}<br>
+           <span class="text-muted">Check the browser console for details.</span>
+         </div>`;
+    }
+  }
+}
 
-    const savedTheme = localStorage.getItem(THEME_KEY) || 'light';
-    applyTheme(savedTheme);
+loadSnapshot();
 
-    document.getElementById('theme-toggle').addEventListener('click', function () {
-        const current = localStorage.getItem(THEME_KEY) || 'light';
-        applyTheme(current === 'dark' ? 'light' : 'dark');
+
+// ── Delta rate counter ─────────────────────────────────────────────────────────
+let deltaTs = [];
+function recordDelta() { deltaTs.push(Date.now()); }
+
+setInterval(() => {
+  const cutoff = Date.now() - 1000;
+  deltaTs = deltaTs.filter(t => t > cutoff);
+  document.getElementById('stat-rate').textContent = deltaTs.length + ' Δ/s';
+}, 500);
+
+
+// ── SSE connection ─────────────────────────────────────────────────────────────
+const sseDot   = document.getElementById('sse-dot');
+const sseLabel = document.getElementById('sse-label');
+
+function connectSSE() {
+  const es = new EventSource('/api/stream');
+
+  es.addEventListener('delta', () => {
+    recordDelta();
+    loadSnapshot();     // SSE delta = trigger a fresh snapshot fetch + replace
+  });
+
+  es.onopen = () => {
+    sseDot.classList.add('connected');
+    sseLabel.textContent = 'Connected';
+  };
+
+  es.onerror = () => {
+    sseDot.classList.remove('connected');
+    sseLabel.textContent = 'Reconnecting…';
+    es.close();
+    setTimeout(connectSSE, 3000);
+  };
+}
+
+connectSSE();
+
+
+// ── Status polling (every 5 s) ─────────────────────────────────────────────────
+function fmtUptime(secs) {
+  if (secs >= 3600) return `${Math.floor(secs/3600)}h ${Math.floor((secs%3600)/60)}m`;
+  return `${Math.floor(secs/60)}m ${secs%60}s`;
+}
+
+function pollStatus() {
+  fetch('/api/status')
+    .then(r => r.json())
+    .then(s => {
+      document.getElementById('stat-window').textContent  = s.window_id          ?? '—';
+      document.getElementById('stat-cutoff').textContent  = s.compaction_cutoff  ?? '—';
+      document.getElementById('stat-clients').textContent = s.sse_client_count   ?? '—';
+      document.getElementById('stat-uptime').textContent  = fmtUptime(s.uptime_secs ?? 0);
+    })
+    .catch(() => {});
+}
+
+pollStatus();
+setInterval(pollStatus, 5000);
+
+
+// ── Alerts panel ───────────────────────────────────────────────────────────────
+const alertsPanel = document.getElementById('alerts-panel');
+
+document.getElementById('alerts-toggle').addEventListener('click', () => {
+  alertsPanel.classList.toggle('show');
+  // Clear badge when opened
+  if (alertsPanel.classList.contains('show')) {
+    document.getElementById('alert-badge').style.display = 'none';
+  }
+});
+document.getElementById('alerts-close').addEventListener('click', () =>
+  alertsPanel.classList.remove('show'));
+
+
+// ── Zoom (native Fullscreen API) ───────────────────────────────────────────────
+const zoomBtn = document.getElementById('zoom-btn');
+const wrapper = document.getElementById('perspective-wrapper');
+
+zoomBtn.addEventListener('click', () => {
+  if (!document.fullscreenElement) {
+    wrapper.requestFullscreen().catch(() => {});
+  } else {
+    document.exitFullscreen();
+  }
+});
+
+document.addEventListener('fullscreenchange', () => {
+  zoomBtn.textContent = document.fullscreenElement ? '✕ Exit' : '⛶ Zoom';
+});
+
+
+// ── Saved views ────────────────────────────────────────────────────────────────
+// Persist and restore the Perspective viewer config (column layout, pivots, etc.)
+// from localStorage so users don't lose their grid setup on reload.
+const VIEWS_KEY = 'hc_views';
+
+function loadViews() {
+  try { return JSON.parse(localStorage.getItem(VIEWS_KEY) || '{}'); } catch { return {}; }
+}
+function saveViews(views) {
+  localStorage.setItem(VIEWS_KEY, JSON.stringify(views));
+}
+
+async function applyView(name) {
+  const views = loadViews();
+  if (!views[name] || !viewerEl) return;
+  try {
+    await viewerEl.restore(views[name]);
+    document.getElementById('current-view-label').textContent = name;
+  } catch (e) {
+    console.warn('[HydroCube] restore view failed:', e);
+  }
+}
+
+// Wire up saved-view menu items
+document.getElementById('views-menu').addEventListener('click', async (e) => {
+  const item = e.target.closest('[data-view]');
+  if (!item) return;
+  e.preventDefault();
+  await applyView(item.dataset.view);
+  document.querySelectorAll('#views-menu .dropdown-item').forEach(el =>
+    el.classList.toggle('active', el === item));
+});
+
+document.getElementById('save-view-btn').addEventListener('click', async (e) => {
+  e.preventDefault();
+  if (!viewerEl) return;
+  const name = prompt('Save view as:', 'My View');
+  if (!name?.trim()) return;
+  const config = await viewerEl.save();
+  const views = loadViews();
+  views[name] = config;
+  saveViews(views);
+  // Add to dropdown if not already there
+  const menu = document.getElementById('views-menu');
+  if (!menu.querySelector(`[data-view="${CSS.escape(name)}"]`)) {
+    const li = document.createElement('li');
+    li.innerHTML = `<a class="dropdown-item" href="#" data-view="${name}">${name}</a>`;
+    menu.insertBefore(li, menu.querySelector('hr'));
+  }
+  document.getElementById('current-view-label').textContent = name;
+});
+
+
+// ── Ad-hoc SQL ─────────────────────────────────────────────────────────────────
+let sqlEditor;
+if (typeof CodeMirror !== 'undefined') {
+  sqlEditor = CodeMirror.fromTextArea(document.getElementById('sql-editor'), {
+    mode: 'text/x-sql',
+    lineNumbers: true,
+    tabSize: 2,
+    indentWithTabs: false,
+    theme: 'default',
+  });
+}
+
+function getSql() {
+  return sqlEditor
+    ? sqlEditor.getValue()
+    : document.getElementById('sql-editor').value;
+}
+
+document.getElementById('run-query-btn').addEventListener('click', async function () {
+  const sql = getSql().trim();
+  if (!sql) return;
+
+  const btn    = this;
+  const meta   = document.getElementById('sql-meta');
+  const result = document.getElementById('sql-result');
+
+  btn.disabled    = true;
+  btn.textContent = '⏳';
+  meta.textContent = '';
+  meta.style.color = '';
+  result.style.display = 'none';
+
+  try {
+    const resp = await fetch('/api/query', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sql }),
     });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.error ?? resp.statusText);
 
-    // ------------------------------------------------------------------
-    // CodeMirror SQL editor
-    // ------------------------------------------------------------------
-    let editor;
-    if (typeof CodeMirror !== 'undefined') {
-        editor = CodeMirror.fromTextArea(document.getElementById('sql-editor'), {
-            mode: 'text/x-sql',
-            lineNumbers: true,
-            tabSize: 2,
-            indentWithTabs: false,
-        });
-    }
+    meta.textContent = `${data.row_count} row${data.row_count === 1 ? '' : 's'} returned`;
+    result.style.display = '';
+    result.innerHTML = `<span class="text-muted">Arrow IPC — ${data.row_count} rows.
+      (Perspective query rendering coming soon)</span>`;
+  } catch (err) {
+    meta.textContent = 'Error: ' + err.message;
+    meta.style.color = 'var(--bs-danger)';
+  } finally {
+    btn.disabled    = false;
+    btn.textContent = '▶ Run';
+  }
+});
 
-    function getSql() {
-        return editor ? editor.getValue() : document.getElementById('sql-editor').value;
-    }
-
-    // ------------------------------------------------------------------
-    // Delta rate counter
-    // ------------------------------------------------------------------
-    let deltaCount = 0;
-    let deltaWindow = [];
-
-    function recordDelta() {
-        const now = Date.now();
-        deltaWindow.push(now);
-        // Keep only the last second
-        deltaWindow = deltaWindow.filter(t => now - t < 1000);
-        deltaCount++;
-    }
-
-    setInterval(function () {
-        const now = Date.now();
-        deltaWindow = deltaWindow.filter(t => now - t < 1000);
-        document.getElementById('rate-display').textContent = deltaWindow.length + ' deltas/sec';
-    }, 500);
-
-    // ------------------------------------------------------------------
-    // SSE connection
-    // ------------------------------------------------------------------
-    const dot = document.getElementById('sse-dot');
-    const sseStatus = document.getElementById('sse-status');
-
-    function connectSSE() {
-        const es = new EventSource('/api/stream');
-
-        es.addEventListener('delta', function (e) {
-            recordDelta();
-            // TODO: push e.data (base64 Arrow IPC) into Perspective viewer
-        });
-
-        es.onopen = function () {
-            dot.classList.add('connected');
-            sseStatus.textContent = 'Connected';
-        };
-
-        es.onerror = function () {
-            dot.classList.remove('connected');
-            sseStatus.textContent = 'Reconnecting…';
-            es.close();
-            setTimeout(connectSSE, 3000);
-        };
-    }
-
-    connectSSE();
-
-    // ------------------------------------------------------------------
-    // Load snapshot on page load
-    // ------------------------------------------------------------------
-    fetch('/api/snapshot')
-        .then(function (r) { return r.json(); })
-        .then(function (data) {
-            // TODO: load data.arrow_ipc_b64 into Perspective viewer
-            console.log('[HydroCube] snapshot loaded', data.row_count, 'rows');
-        })
-        .catch(function (err) {
-            console.warn('[HydroCube] snapshot load failed:', err);
-        });
-
-    // ------------------------------------------------------------------
-    // Status polling (every 5 s)
-    // ------------------------------------------------------------------
-    function pollStatus() {
-        fetch('/api/status')
-            .then(function (r) { return r.json(); })
-            .then(function (s) {
-                document.getElementById('stat-window-id').textContent = s.window_id;
-                document.getElementById('stat-cutoff').textContent = s.compaction_cutoff;
-                document.getElementById('stat-sse-clients').textContent = s.sse_client_count;
-                document.getElementById('stat-uptime').textContent = s.uptime_secs + 's';
-            })
-            .catch(function () {});
-    }
-
-    pollStatus();
-    setInterval(pollStatus, 5000);
-
-    // ------------------------------------------------------------------
-    // Ad-hoc query execution
-    // ------------------------------------------------------------------
-    document.getElementById('run-query-btn').addEventListener('click', function () {
-        const sql = getSql().trim();
-        if (!sql) return;
-
-        const btn = this;
-        btn.disabled = true;
-        btn.textContent = 'Running…';
-
-        fetch('/api/query', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ sql: sql }),
-        })
-            .then(function (r) {
-                if (!r.ok) {
-                    return r.json().then(function (e) {
-                        throw new Error(e.error || r.statusText);
-                    });
-                }
-                return r.json();
-            })
-            .then(function (data) {
-                document.getElementById('query-result').style.display = '';
-                document.getElementById('query-row-count').textContent = data.row_count + ' rows';
-                document.getElementById('query-result-content').textContent =
-                    'Arrow IPC (base64) — ' + data.row_count + ' rows returned. ' +
-                    'TODO: render via Perspective once WASM is vendored.';
-            })
-            .catch(function (err) {
-                document.getElementById('query-result').style.display = '';
-                document.getElementById('query-row-count').textContent = 'Error';
-                document.getElementById('query-result-content').textContent =
-                    'Error: ' + err.message;
-            })
-            .finally(function () {
-                btn.disabled = false;
-                btn.textContent = 'Run';
-            });
-    });
-
-})();
 </script>
 </body>
 </html>

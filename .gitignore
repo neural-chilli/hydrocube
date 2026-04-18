@@ -12,5 +12,12 @@ Cargo.lock
 .DS_Store
 Thumbs.db
 
+# Local test data (created by run-test-env.sh)
+/.local/
+
+# Vendored front-end assets (fetched by scripts/vendor.sh — not checked in)
+/static/perspective/
+/static/bootstrap/bootstrap.min.css
+
 # Claude AI worktrees (project-specific)
 /.claude/worktrees/

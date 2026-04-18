@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HydroCube — Wireframe</title>
+
+  <!-- Bootswatch Flatly (light) / Darkly (dark) via CDN for wireframe -->
+  <link id="theme-css" rel="stylesheet"
+        href="https://cdn.jsdelivr.net/npm/bootswatch@5.3.3/dist/flatly/bootstrap.min.css">
+
+  <style>
+    /* ------------------------------------------------------------------ */
+    /* Layout scaffold                                                      */
+    /* ------------------------------------------------------------------ */
+    html, body {
+      height: 100%;
+      margin: 0;
+      overflow: hidden;           /* no page scroll — all scroll inside pane */
+    }
+
+    body {
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Navbar sits at the top, fixed height */
+    #top-nav {
+      flex: 0 0 auto;
+      z-index: 1030;
+    }
+
+    /* Perspective fills the remaining vertical space between nav and status */
+    #perspective-wrapper {
+      flex: 1 1 auto;
+      position: relative;
+      overflow: hidden;
+      min-height: 0;              /* critical for flex children */
+    }
+
+    #perspective-placeholder {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: repeating-linear-gradient(
+        45deg,
+        rgba(0,0,0,.03) 0px,
+        rgba(0,0,0,.03) 10px,
+        transparent 10px,
+        transparent 20px
+      );
+      border-top: 1px solid var(--bs-border-color);
+      border-bottom: 1px solid var(--bs-border-color);
+      color: var(--bs-secondary-color);
+      font-style: italic;
+      font-size: 0.95rem;
+      user-select: none;
+      gap: 8px;
+    }
+
+    #perspective-placeholder .icon {
+      font-size: 3rem;
+      opacity: .25;
+    }
+
+    /* Zoom overlay button — sits on top of perspective pane */
+    #zoom-btn {
+      position: absolute;
+      top: 10px;
+      right: 14px;
+      z-index: 10;
+      opacity: .7;
+    }
+    #zoom-btn:hover { opacity: 1; }
+
+    /* Status strip — always visible, single compact row */
+    #status-strip {
+      flex: 0 0 auto;
+      font-size: 0.78rem;
+      padding: 4px 16px;
+      border-top: 1px solid var(--bs-border-color);
+      background: var(--bs-tertiary-bg);
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      color: var(--bs-secondary-color);
+    }
+
+    #status-strip .sse-dot {
+      display: inline-block;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #dc3545;
+      vertical-align: middle;
+      margin-right: 4px;
+      animation: pulse 1.8s infinite;
+    }
+    #status-strip .sse-dot.connected {
+      background: #28a745;
+      animation: none;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: .3; }
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Alerts panel (slide-down from navbar, not a full page)              */
+    /* ------------------------------------------------------------------ */
+    #alerts-panel {
+      position: fixed;
+      top: 56px;          /* below navbar */
+      right: 0;
+      width: 360px;
+      max-height: calc(100vh - 56px - 28px); /* leave status strip */
+      overflow-y: auto;
+      z-index: 1025;
+      box-shadow: -4px 0 16px rgba(0,0,0,.15);
+      display: none;
+    }
+    #alerts-panel.show { display: block; }
+
+    /* ------------------------------------------------------------------ */
+    /* Fullscreen overlay (zoom mode)                                       */
+    /* ------------------------------------------------------------------ */
+    #fullscreen-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: var(--bs-body-bg);
+      z-index: 2000;
+      flex-direction: column;
+    }
+    #fullscreen-overlay.show { display: flex; }
+    #fullscreen-overlay #fs-perspective {
+      flex: 1 1 auto;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-style: italic;
+      color: var(--bs-secondary-color);
+      background: repeating-linear-gradient(
+        45deg,
+        rgba(0,0,0,.03) 0px,
+        rgba(0,0,0,.03) 10px,
+        transparent 10px,
+        transparent 20px
+      );
+    }
+    #fullscreen-overlay #fs-close {
+      position: absolute;
+      top: 12px;
+      right: 16px;
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Dark-mode overrides (bootswatch darkly takes care of most things)   */
+    /* ------------------------------------------------------------------ */
+    [data-bs-theme="dark"] #perspective-placeholder {
+      background: repeating-linear-gradient(
+        45deg,
+        rgba(255,255,255,.03) 0px,
+        rgba(255,255,255,.03) 10px,
+        transparent 10px,
+        transparent 20px
+      );
+    }
+  </style>
+</head>
+<body>
+
+<!-- ======================================================================
+     NAVBAR
+====================================================================== -->
+<nav id="top-nav" class="navbar navbar-expand-lg px-3" style="height:56px;">
+  <div class="d-flex align-items-center gap-2 me-4">
+    <!-- Logo -->
+    <img src="../static/images/hydrocube-logo.webp"
+         alt="HydroCube" height="30"
+         onerror="this.style.display='none'; document.getElementById('brand-text').style.display='inline'">
+    <span id="brand-text" class="navbar-brand fw-bold mb-0" style="display:none">HydroCube</span>
+  </div>
+
+  <!-- Cube selector -->
+  <div class="dropdown me-2">
+    <button class="btn btn-sm btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown">
+      <span class="me-1">⬡</span> trading_positions
+    </button>
+    <ul class="dropdown-menu">
+      <li><a class="dropdown-item active" href="#">trading_positions</a></li>
+      <li><a class="dropdown-item" href="#">risk_ladder</a></li>
+      <li><a class="dropdown-item" href="#">pnl_summary</a></li>
+      <li><hr class="dropdown-divider"></li>
+      <li><a class="dropdown-item text-muted" href="#"><em>+ Connect to cube…</em></a></li>
+    </ul>
+  </div>
+
+  <!-- Saved views selector -->
+  <div class="dropdown me-auto">
+    <button class="btn btn-sm btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown">
+      <span class="me-1">📋</span> Default View
+    </button>
+    <ul class="dropdown-menu">
+      <li><a class="dropdown-item active" href="#">Default View</a></li>
+      <li><a class="dropdown-item" href="#">By Desk</a></li>
+      <li><a class="dropdown-item" href="#">By Currency</a></li>
+      <li><a class="dropdown-item" href="#">Net Positions</a></li>
+      <li><hr class="dropdown-divider"></li>
+      <li><a class="dropdown-item" href="#"><em>Save current view…</em></a></li>
+      <li><a class="dropdown-item" href="#"><em>Manage views…</em></a></li>
+    </ul>
+  </div>
+
+  <!-- Right-hand controls -->
+  <div class="d-flex align-items-center gap-2">
+
+    <!-- SQL button -->
+    <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#sql-modal"
+            title="Ad-hoc SQL query">
+      SQL
+    </button>
+
+    <!-- Theme toggle -->
+    <button id="theme-btn" class="btn btn-sm btn-outline-secondary" title="Toggle dark/light">
+      🌙
+    </button>
+
+    <!-- Alerts bell with badge -->
+    <button id="alerts-toggle" class="btn btn-sm btn-outline-secondary position-relative" title="Alerts">
+      🔔
+      <span id="alert-badge" class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger"
+            style="font-size:.6rem">
+        3<span class="visually-hidden">unread alerts</span>
+      </span>
+    </button>
+
+  </div>
+</nav>
+
+<!-- ======================================================================
+     PERSPECTIVE PANE (fills remaining space)
+====================================================================== -->
+<div id="perspective-wrapper">
+
+  <!-- Zoom button overlay -->
+  <button id="zoom-btn" class="btn btn-sm btn-secondary" title="Fullscreen">
+    ⛶ Zoom
+  </button>
+
+  <!-- Placeholder (replaced by <perspective-viewer> when WASM loads) -->
+  <div id="perspective-placeholder">
+    <div class="icon">⬡</div>
+    <div><strong>Perspective Viewer</strong></div>
+    <div class="small text-muted">@finos/perspective WASM — real-time pivot &amp; aggregation</div>
+    <div class="mt-3 d-flex gap-2 small text-muted opacity-50">
+      <span class="badge bg-secondary">Rows: 1,024</span>
+      <span class="badge bg-secondary">Updated: just now</span>
+    </div>
+  </div>
+
+</div>
+
+<!-- ======================================================================
+     STATUS STRIP
+====================================================================== -->
+<div id="status-strip">
+  <span>
+    <span class="sse-dot connected" id="sse-dot"></span>
+    <span id="sse-label">Connected</span>
+  </span>
+  <span>Window: <strong id="stat-window">142</strong></span>
+  <span>Rate: <strong id="stat-rate">50 deltas/sec</strong></span>
+  <span>Cutoff: <strong id="stat-cutoff">2026-04-18T09:00Z</strong></span>
+  <span class="ms-auto">SSE clients: <strong id="stat-clients">1</strong></span>
+  <span>Uptime: <strong id="stat-uptime">4m 32s</strong></span>
+</div>
+
+<!-- ======================================================================
+     ALERTS PANEL (slide from right, not full-page)
+====================================================================== -->
+<div id="alerts-panel" class="card border-0 rounded-0">
+  <div class="card-header d-flex justify-content-between align-items-center py-2">
+    <span class="fw-semibold">🔔 Alerts</span>
+    <button class="btn btn-sm btn-outline-secondary" id="alerts-close">✕</button>
+  </div>
+
+  <!-- Active alerts summary -->
+  <div class="card-body border-bottom py-2">
+    <div class="fw-semibold small mb-2 text-danger">Active (2)</div>
+    <div class="d-flex flex-column gap-2">
+      <div class="alert alert-danger py-1 px-2 mb-0 small">
+        <strong>book=RATES-EU</strong> net_quantity &gt; 50M
+        <div class="text-muted" style="font-size:.7rem">triggered 2m ago</div>
+      </div>
+      <div class="alert alert-warning py-1 px-2 mb-0 small">
+        <strong>desk=RATES</strong> trade_count spike (+300%)
+        <div class="text-muted" style="font-size:.7rem">triggered 5m ago</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Alert history -->
+  <div class="card-body py-2">
+    <div class="fw-semibold small mb-2 text-muted">History</div>
+    <table class="table table-sm table-striped mb-0 small">
+      <thead>
+        <tr><th>Time</th><th>Rule</th><th>Value</th><th>Status</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="text-muted">09:12</td>
+          <td>net_qty &gt; 50M</td>
+          <td>52.1M</td>
+          <td><span class="badge bg-danger">ACTIVE</span></td>
+        </tr>
+        <tr>
+          <td class="text-muted">09:09</td>
+          <td>trade_count spike</td>
+          <td>+318%</td>
+          <td><span class="badge bg-warning text-dark">ACTIVE</span></td>
+        </tr>
+        <tr>
+          <td class="text-muted">08:55</td>
+          <td>notional &gt; 100M</td>
+          <td>104.3M</td>
+          <td><span class="badge bg-success">CLEARED</span></td>
+        </tr>
+        <tr>
+          <td class="text-muted">08:31</td>
+          <td>net_qty &gt; 50M</td>
+          <td>51.0M</td>
+          <td><span class="badge bg-success">CLEARED</span></td>
+        </tr>
+        <tr>
+          <td class="text-muted">08:14</td>
+          <td>trade_count spike</td>
+          <td>+275%</td>
+          <td><span class="badge bg-success">CLEARED</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="card-footer py-1 small text-center">
+    <a href="#" class="text-muted">Configure alert rules…</a>
+  </div>
+</div>
+
+<!-- ======================================================================
+     SQL MODAL
+====================================================================== -->
+<div class="modal fade" id="sql-modal" tabindex="-1" aria-labelledby="sql-modal-label" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content">
+
+      <div class="modal-header py-2">
+        <h6 class="modal-title fw-semibold" id="sql-modal-label">Ad-hoc SQL Query</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+
+      <div class="modal-body pb-2">
+        <textarea id="sql-editor" class="form-control font-monospace"
+                  rows="5"
+                  style="font-size:.85rem; resize:vertical"
+>SELECT book, desk, instrument_type, currency,
+       total_notional, net_quantity, trade_count
+FROM   agg
+ORDER  BY total_notional DESC
+LIMIT  100</textarea>
+        <div class="text-muted small mt-1">Queries run against the current aggregated view (<code>agg</code> table).</div>
+      </div>
+
+      <div class="modal-footer py-2 d-flex justify-content-between">
+        <div id="sql-result-meta" class="small text-muted">No results yet</div>
+        <div class="d-flex gap-2">
+          <button class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button class="btn btn-sm btn-primary" id="run-query-btn">▶ Run</button>
+        </div>
+      </div>
+
+      <!-- Result renders here (inside modal, no separate panel) -->
+      <div id="sql-result-area" class="border-top px-3 pb-3" style="display:none; max-height:300px; overflow-y:auto">
+        <table class="table table-sm table-striped mt-2 mb-0 small font-monospace">
+          <thead>
+            <tr>
+              <th>book</th><th>desk</th><th>instrument_type</th>
+              <th>currency</th><th>total_notional</th><th>net_qty</th><th>trades</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>RATES-EU</td><td>RATES</td><td>IRS</td><td>EUR</td>
+                <td>104,234,100</td><td>52,100,000</td><td>843</td></tr>
+            <tr><td>RATES-US</td><td>RATES</td><td>IRS</td><td>USD</td>
+                <td>98,120,500</td><td>21,400,000</td><td>791</td></tr>
+            <tr><td>RATES-EU</td><td>RATES</td><td>FRA</td><td>EUR</td>
+                <td>45,900,000</td><td>-8,600,000</td><td>312</td></tr>
+            <tr><td>CREDIT-IG</td><td>CREDIT</td><td>CDS</td><td>USD</td>
+                <td>31,445,000</td><td>9,220,000</td><td>205</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ======================================================================
+     FULLSCREEN OVERLAY
+====================================================================== -->
+<div id="fullscreen-overlay">
+  <div id="fs-perspective">
+    <div style="text-align:center; opacity:.4;">
+      <div style="font-size:4rem">⬡</div>
+      <div>Perspective — fullscreen</div>
+    </div>
+  </div>
+  <button id="fs-close" class="btn btn-sm btn-outline-secondary">✕ Exit fullscreen</button>
+</div>
+
+<!-- ======================================================================
+     Scripts (Bootstrap 5 CDN for wireframe)
+====================================================================== -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ------------------------------------------------------------------
+     Theme toggle
+  ------------------------------------------------------------------ */
+  const THEMES = {
+    light: 'https://cdn.jsdelivr.net/npm/bootswatch@5.3.3/dist/flatly/bootstrap.min.css',
+    dark:  'https://cdn.jsdelivr.net/npm/bootswatch@5.3.3/dist/darkly/bootstrap.min.css',
+  };
+  let currentTheme = localStorage.getItem('hc_theme') || 'light';
+
+  function applyTheme(t) {
+    document.getElementById('theme-css').href = THEMES[t];
+    document.documentElement.setAttribute('data-bs-theme', t);
+    document.getElementById('theme-btn').textContent = t === 'dark' ? '☀️' : '🌙';
+    currentTheme = t;
+    localStorage.setItem('hc_theme', t);
+  }
+
+  applyTheme(currentTheme);
+
+  document.getElementById('theme-btn').addEventListener('click', function () {
+    applyTheme(currentTheme === 'dark' ? 'light' : 'dark');
+  });
+
+  /* ------------------------------------------------------------------
+     Alerts panel toggle
+  ------------------------------------------------------------------ */
+  const alertsPanel = document.getElementById('alerts-panel');
+
+  document.getElementById('alerts-toggle').addEventListener('click', function () {
+    alertsPanel.classList.toggle('show');
+    // Clear badge on open
+    if (alertsPanel.classList.contains('show')) {
+      document.getElementById('alert-badge').style.display = 'none';
+    }
+  });
+
+  document.getElementById('alerts-close').addEventListener('click', function () {
+    alertsPanel.classList.remove('show');
+  });
+
+  /* ------------------------------------------------------------------
+     SQL modal — show dummy results on Run
+  ------------------------------------------------------------------ */
+  document.getElementById('run-query-btn').addEventListener('click', function () {
+    const btn = this;
+    btn.disabled = true;
+    btn.textContent = '⏳ Running…';
+    setTimeout(function () {
+      document.getElementById('sql-result-area').style.display = '';
+      document.getElementById('sql-result-meta').textContent = '4 rows · 12 ms';
+      btn.disabled = false;
+      btn.textContent = '▶ Run';
+    }, 600);
+  });
+
+  /* ------------------------------------------------------------------
+     Zoom / fullscreen
+  ------------------------------------------------------------------ */
+  const overlay = document.getElementById('fullscreen-overlay');
+
+  document.getElementById('zoom-btn').addEventListener('click', function () {
+    overlay.classList.add('show');
+  });
+
+  document.getElementById('fs-close').addEventListener('click', function () {
+    overlay.classList.remove('show');
+  });
+
+  /* ------------------------------------------------------------------
+     Simulated live status ticks (demo only)
+  ------------------------------------------------------------------ */
+  let windowId = 142;
+  let uptime = 272; // seconds
+
+  setInterval(function () {
+    windowId++;
+    uptime++;
+    document.getElementById('stat-window').textContent = windowId;
+    const m = Math.floor(uptime / 60);
+    const s = uptime % 60;
+    document.getElementById('stat-uptime').textContent = m + 'm ' + s + 's';
+  }, 1000);
+
+})();
+</script>
+</body>
+</html>
