@@ -202,19 +202,31 @@ fn array_value_to_string(array: &ArrayRef, row: usize) -> String {
         }
         // Timestamps: read the raw integer value so changes are detectable.
         DataType::Timestamp(TimeUnit::Microsecond, _) => {
-            let arr = array.as_any().downcast_ref::<TimestampMicrosecondArray>().unwrap();
+            let arr = array
+                .as_any()
+                .downcast_ref::<TimestampMicrosecondArray>()
+                .unwrap();
             arr.value(row).to_string()
         }
         DataType::Timestamp(TimeUnit::Millisecond, _) => {
-            let arr = array.as_any().downcast_ref::<TimestampMillisecondArray>().unwrap();
+            let arr = array
+                .as_any()
+                .downcast_ref::<TimestampMillisecondArray>()
+                .unwrap();
             arr.value(row).to_string()
         }
         DataType::Timestamp(TimeUnit::Second, _) => {
-            let arr = array.as_any().downcast_ref::<TimestampSecondArray>().unwrap();
+            let arr = array
+                .as_any()
+                .downcast_ref::<TimestampSecondArray>()
+                .unwrap();
             arr.value(row).to_string()
         }
         DataType::Timestamp(TimeUnit::Nanosecond, _) => {
-            let arr = array.as_any().downcast_ref::<TimestampNanosecondArray>().unwrap();
+            let arr = array
+                .as_any()
+                .downcast_ref::<TimestampNanosecondArray>()
+                .unwrap();
             arr.value(row).to_string()
         }
         // Dates and other types: use a stable debug representation (excludes row index).

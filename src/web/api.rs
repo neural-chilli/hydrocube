@@ -153,7 +153,11 @@ pub struct SnapshotResponse {
 pub async fn snapshot_handler(
     State(state): State<Arc<AppState>>,
 ) -> ApiResult<Json<SnapshotResponse>> {
-    let batches = state.db.query_arrow(&state.snapshot_sql).await.map_err(ApiError::from)?;
+    let batches = state
+        .db
+        .query_arrow(&state.snapshot_sql)
+        .await
+        .map_err(ApiError::from)?;
 
     let (row_count, arrow_ipc_b64) = concat_and_serialize(&batches)?;
 

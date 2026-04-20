@@ -112,14 +112,10 @@ impl AggSqlGenerator {
         if self.dimensions.is_empty() {
             return self.original_sql.clone();
         }
-        let key_expr = format!(
-            "CONCAT_WS('|', {})",
-            self.dimensions.join(", ")
-        );
+        let key_expr = format!("CONCAT_WS('|', {})", self.dimensions.join(", "));
         format!(
             "SELECT *, {} AS _key FROM ({}) _agg",
-            key_expr,
-            self.original_sql
+            key_expr, self.original_sql
         )
     }
 }
