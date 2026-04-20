@@ -96,6 +96,32 @@ impl AggSqlGenerator {
     pub fn full_aggregation_sql(&self) -> String {
         self.original_sql.clone()
     }
+
+    /// Returns the full aggregation SQL wrapped to include a synthetic `_key`
+    /// column — a pipe-delimited concatenation of all GROUP BY dimensions.
+    ///
+    /// The `_key` column is used by the Perspective viewer as a stable row
+    /// index for true upserts (rather than full table replacement on every
+    /// window flush).
+    ///
+    /// Example output for dimensions `[book, desk]`:
+    /// ```sql
+    /// SELECT *, CONCAT_WS('|', book, desk) AS _key FROM (<original_sql>) _agg
+    /// ```
+    pub fn full_aggregation_sql_with_key(&self) -> String {
+        if self.dimensions.is_empty() {
+            return self.original_sql.clone();
+        }
+        let key_expr = format!(
+            "CONCAT_WS('|', {})",
+            self.dimensions.join(", ")
+        );
+        format!(
+            "SELECT *, {} AS _key FROM ({}) _agg",
+            key_expr,
+            self.original_sql
+        )
+    }
 }
 
 // ---------------------------------------------------------------------------

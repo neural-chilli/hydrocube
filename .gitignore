@@ -15,9 +15,8 @@ Thumbs.db
 # Local test data (created by run-test-env.sh)
 /.local/
 
-# Vendored front-end assets (fetched by scripts/vendor.sh — not checked in)
-/static/perspective/
-/static/bootstrap/bootstrap.min.css
+# Vendored front-end assets are committed so `git clone && cargo build` works
+# without running scripts/vendor.sh. Re-run vendor.sh only when upgrading versions.
 
 # Claude AI worktrees (project-specific)
 /.claude/worktrees/

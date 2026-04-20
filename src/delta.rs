@@ -14,9 +14,10 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use duckdb::arrow::array::{
-    Array, ArrayRef, Float64Array, Int32Array, Int64Array, StringArray, UInt32Array,
+    Array, ArrayRef, Float64Array, Int32Array, Int64Array, StringArray, TimestampMicrosecondArray,
+    TimestampMillisecondArray, TimestampNanosecondArray, TimestampSecondArray, UInt32Array,
 };
-use duckdb::arrow::datatypes::DataType;
+use duckdb::arrow::datatypes::{DataType, TimeUnit};
 use duckdb::arrow::record_batch::RecordBatch;
 
 // ---------------------------------------------------------------------------
@@ -199,8 +200,25 @@ fn array_value_to_string(array: &ArrayRef, row: usize) -> String {
                 .unwrap();
             format!("{}", arr.value(row).to_bits())
         }
-        // Timestamps, dates, and other types: use the debug representation.
-        _ => format!("{:?}:row{}", array.data_type(), row),
+        // Timestamps: read the raw integer value so changes are detectable.
+        DataType::Timestamp(TimeUnit::Microsecond, _) => {
+            let arr = array.as_any().downcast_ref::<TimestampMicrosecondArray>().unwrap();
+            arr.value(row).to_string()
+        }
+        DataType::Timestamp(TimeUnit::Millisecond, _) => {
+            let arr = array.as_any().downcast_ref::<TimestampMillisecondArray>().unwrap();
+            arr.value(row).to_string()
+        }
+        DataType::Timestamp(TimeUnit::Second, _) => {
+            let arr = array.as_any().downcast_ref::<TimestampSecondArray>().unwrap();
+            arr.value(row).to_string()
+        }
+        DataType::Timestamp(TimeUnit::Nanosecond, _) => {
+            let arr = array.as_any().downcast_ref::<TimestampNanosecondArray>().unwrap();
+            arr.value(row).to_string()
+        }
+        // Dates and other types: use a stable debug representation (excludes row index).
+        other => format!("{:?}", other),
     }
 }
 

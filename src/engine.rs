@@ -11,7 +11,7 @@ use tokio::sync::{broadcast, mpsc, watch};
 use crate::aggregation::sql_gen::AggSqlGenerator;
 use crate::aggregation::window;
 use crate::config::{ColumnDef, CubeConfig};
-use crate::db_manager::DbManager;
+use crate::db_manager::{arrow::compute::concat_batches, DbManager};
 use crate::delta::DeltaDetector;
 use crate::error::HcResult;
 use crate::ingest::parser::JsonParser;
@@ -42,11 +42,10 @@ pub async fn run_hot_path(
     let dimension_names: Vec<String> = agg_gen.dimensions().iter().map(|d| d.to_string()).collect();
     let mut detector = DeltaDetector::new(dimension_names);
 
-    // Use the user's original aggregation SQL (queries all retained slices).
-    // The slice_aggregation_sql() with cutoff filter is only correct once
-    // compaction rebuilds the consolidated table — until then, we need to
-    // scan all slices to avoid losing data after compaction deletes old rows.
-    let agg_sql = agg_gen.full_aggregation_sql();
+    // Use the full aggregation SQL wrapped with a synthetic _key column.
+    // _key is a pipe-delimited concatenation of all GROUP BY dimensions,
+    // used by the Perspective viewer as a stable row index for true upserts.
+    let agg_sql = agg_gen.full_aggregation_sql_with_key();
 
     let pipeline = config
         .transform
@@ -95,11 +94,20 @@ pub async fn run_hot_path(
                 let insert_sql = build_insert_sql(&config.schema.columns, &rows, window_id);
                 db.execute(insert_sql, vec![]).await?;
 
-                // Aggregate all retained slices
+                // Aggregate all retained slices.
+                // DuckDB may return the result across multiple Arrow batches;
+                // concatenate them before delta detection so no rows are missed.
                 let batches = db.query_arrow(agg_sql.clone()).await?;
 
                 if !batches.is_empty() {
-                    let (upserts, _deletes) = detector.detect(&batches[0]);
+                    let combined = if batches.len() == 1 {
+                        batches[0].clone()
+                    } else {
+                        let schema = batches[0].schema();
+                        concat_batches(&schema, &batches)
+                            .unwrap_or_else(|_| batches[0].clone())
+                    };
+                    let (upserts, _deletes) = detector.detect(&combined);
 
                     if upserts.num_rows() > 0 {
                         if let Ok(b64) = batch_to_base64_arrow(&upserts) {

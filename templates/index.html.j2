@@ -5,25 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>HydroCube — {{ cube_name }}</title>
 
-  <!-- Bootswatch theme (swapped by JS) -->
-  <link id="theme-css" rel="stylesheet" href="/assets/bootswatch/flatly.min.css">
-  <!-- Perspective viewer CSS — "Pro Light" and "Pro Dark" themes -->
+  <link id="theme-css"    rel="stylesheet" href="/assets/bootswatch/flatly.min.css">
   <link id="psp-theme-css" rel="stylesheet" href="/assets/perspective/css/pro.css">
-  <link rel="stylesheet" href="/assets/perspective/css/icons.css">
-  <!-- CodeMirror (SQL modal) -->
-  <link rel="stylesheet" href="/assets/codemirror/codemirror.min.css">
+  <link rel="stylesheet"                    href="/assets/perspective/css/icons.css">
+  <link rel="stylesheet"                    href="/assets/codemirror/codemirror.min.css">
 
   <style>
-    /* ── Full-height flex column layout ─────────────────────────────────── */
-    html, body {
-      height: 100%;
-      margin: 0;
-      overflow: hidden;         /* no page scroll — Perspective scrolls inside */
-    }
-    body {
-      display: flex;
-      flex-direction: column;
-    }
+    /* ── Layout ──────────────────────────────────────────────────────────── */
+    html, body { height: 100%; margin: 0; overflow: hidden; }
+    body { display: flex; flex-direction: column; }
 
     /* ── Navbar ──────────────────────────────────────────────────────────── */
     #top-nav {
@@ -33,28 +23,28 @@
       border-bottom: 1px solid #2e4560;
       display: flex;
       align-items: center;
-      padding: 0 12px;
-      gap: 8px;
+      padding: 0 10px;
+      gap: 6px;
       z-index: 1030;
     }
 
-    /* Ghost buttons for the nav — white-on-blue-grey */
     .nav-btn {
       color: rgba(255,255,255,.88);
-      border: 1px solid rgba(255,255,255,.28);
+      border: 1px solid rgba(255,255,255,.26);
       background: transparent;
       border-radius: 4px;
-      padding: 3px 10px;
-      font-size: .82rem;
+      padding: 3px 9px;
+      font-size: .81rem;
       cursor: pointer;
       white-space: nowrap;
-      line-height: 1.4;
+      line-height: 1.5;
+      user-select: none;
     }
-    .nav-btn:hover    { background: rgba(255,255,255,.13); }
-    .nav-btn:active   { background: rgba(255,255,255,.20); }
+    .nav-btn:hover  { background: rgba(255,255,255,.13); }
+    .nav-btn:active { background: rgba(255,255,255,.22); }
+    .nav-btn:disabled { opacity: .45; cursor: default; }
 
-    /* Dropdowns inherit Bootstrap theming; just force text colour in nav */
-    #top-nav .dropdown-toggle { display: flex; align-items: center; gap: 5px; }
+    #top-nav .dropdown-toggle { display: flex; align-items: center; gap: 4px; }
     #top-nav .dropdown-menu   { color: var(--bs-body-color); }
 
     #nav-brand {
@@ -66,12 +56,43 @@
     }
     #nav-spacer { flex: 1 1 auto; }
 
-    /* ── Perspective wrapper (fills all remaining vertical space) ─────────── */
+    /* Divider between nav control groups */
+    .nav-sep {
+      width: 1px;
+      height: 22px;
+      background: rgba(255,255,255,.2);
+      flex-shrink: 0;
+    }
+
+    /* Zoom label inside the +/- group */
+    #zoom-label {
+      color: rgba(255,255,255,.7);
+      font-size: .76rem;
+      min-width: 36px;
+      text-align: center;
+      user-select: none;
+    }
+
+    /* ── Perspective wrapper ────────────────────────────────────────────── */
     #perspective-wrapper {
       flex: 1 1 auto;
       position: relative;
       overflow: hidden;
-      min-height: 0;            /* critical for flex shrink */
+      min-height: 0;
+      /* Slightly muted background visible beneath Pro Light theme */
+      background: #eef1f5;
+    }
+    [data-bs-theme="dark"] #perspective-wrapper { background: #1a1f2b; }
+
+    /* Intermediate zoom host: the transform lives here, NOT on perspective-viewer.
+       This ensures Perspective's own getBoundingClientRect() / offsetWidth calls
+       always see the unscaled element dimensions, preventing column-width drift. */
+    #psp-zoom-host {
+      position: absolute;
+      top: 0;
+      left: 0;
+      transform-origin: top left;
+      overflow: hidden;   /* clip any internal overflow at this layer */
     }
 
     perspective-viewer {
@@ -80,7 +101,7 @@
       display: block;
     }
 
-    /* Loading overlay — shown until first snapshot loads */
+    /* Loading/error overlay */
     #psp-loading {
       position: absolute;
       inset: 0;
@@ -90,19 +111,16 @@
       align-items: center;
       justify-content: center;
       gap: 14px;
-      background: var(--bs-body-bg, #fff);
-      color: var(--bs-secondary-color, #6c757d);
+      background: #eef1f5;
+      color: #6c757d;
       font-style: italic;
       transition: opacity .3s;
     }
-    #psp-loading.hidden {
-      opacity: 0;
-      pointer-events: none;
-    }
+    [data-bs-theme="dark"] #psp-loading { background: #1a1f2b; color: #8d99ae; }
+    #psp-loading.hidden { opacity: 0; pointer-events: none; }
 
     .psp-spinner {
-      width: 34px;
-      height: 34px;
+      width: 34px; height: 34px;
       border: 3px solid rgba(61,90,120,.18);
       border-top-color: #3d5a78;
       border-radius: 50%;
@@ -110,18 +128,7 @@
     }
     @keyframes hc-spin { to { transform: rotate(360deg); } }
 
-    /* Zoom/fullscreen button — floats top-right of the Perspective pane */
-    #zoom-btn {
-      position: absolute;
-      top: 10px;
-      right: 14px;
-      z-index: 10;
-      opacity: .65;
-      transition: opacity .15s;
-    }
-    #zoom-btn:hover { opacity: 1; }
-
-    /* ── Status strip ────────────────────────────────────────────────────── */
+    /* ── Status strip ───────────────────────────────────────────────────── */
     #status-strip {
       flex: 0 0 auto;
       height: 26px;
@@ -139,28 +146,20 @@
 
     .sse-dot {
       display: inline-block;
-      width: 7px;
-      height: 7px;
+      width: 7px; height: 7px;
       border-radius: 50%;
       background: #ff6b6b;
       vertical-align: middle;
       margin-right: 4px;
       animation: hc-pulse 1.8s ease-in-out infinite;
     }
-    .sse-dot.connected {
-      background: #51cf66;
-      animation: none;
-    }
-    @keyframes hc-pulse {
-      0%, 100% { opacity: 1;  }
-      50%       { opacity: .3; }
-    }
+    .sse-dot.connected { background: #51cf66; animation: none; }
+    @keyframes hc-pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
 
-    /* ── Alerts panel (slides in from right, fixed, never takes main space) */
+    /* ── Alerts panel ───────────────────────────────────────────────────── */
     #alerts-panel {
       position: fixed;
-      top: 48px;
-      right: 0;
+      top: 48px; right: 0;
       width: 360px;
       max-height: calc(100vh - 48px - 26px);
       overflow-y: auto;
@@ -170,7 +169,7 @@
     }
     #alerts-panel.show { display: block; }
 
-    /* ── CodeMirror in modal ──────────────────────────────────────────────── */
+    /* ── CodeMirror ─────────────────────────────────────────────────────── */
     .CodeMirror {
       height: 140px;
       font-size: 13px;
@@ -183,15 +182,14 @@
 <!-- ═══════════════════════════════════════════════════════════════ Navbar -->
 <nav id="top-nav">
 
-  <!-- Logo + brand name -->
+  <!-- Brand -->
   <img src="/assets/images/hydrocube-logo.webp" alt="" height="26"
-       style="border-radius:5px; flex-shrink:0"
-       onerror="this.style.display='none'">
+       style="border-radius:5px;flex-shrink:0" onerror="this.style.display='none'">
   <span id="nav-brand">HydroCube</span>
 
   <!-- Cube selector -->
   <div class="dropdown ms-1">
-    <button class="nav-btn dropdown-toggle" data-bs-toggle="dropdown" aria-expanded="false">
+    <button class="nav-btn dropdown-toggle" data-bs-toggle="dropdown">
       ⬡ {{ cube_name }}
     </button>
     <ul class="dropdown-menu shadow-sm">
@@ -203,33 +201,42 @@
 
   <!-- Saved views -->
   <div class="dropdown">
-    <button class="nav-btn dropdown-toggle" id="views-toggle-btn"
-            data-bs-toggle="dropdown" aria-expanded="false">
+    <button class="nav-btn dropdown-toggle" id="views-toggle-btn" data-bs-toggle="dropdown">
       📋 <span id="current-view-label">Default View</span>
     </button>
     <ul class="dropdown-menu shadow-sm" id="views-menu">
-      <li><a class="dropdown-item active" href="#" data-view="default">Default View</a></li>
-      <li><hr class="dropdown-divider"></li>
-      <li><a class="dropdown-item" href="#" id="save-view-btn"><em>Save current view…</em></a></li>
+      <li><a class="dropdown-item active" href="#" data-view="__default__">Default View</a></li>
+      <li><hr class="dropdown-divider" id="views-divider"></li>
+      <li><a class="dropdown-item" href="#" id="save-view-btn">
+        <em>Save current view…</em>
+      </a></li>
     </ul>
   </div>
 
   <div id="nav-spacer"></div>
 
-  <!-- SQL modal trigger -->
-  <button class="nav-btn" data-bs-toggle="modal" data-bs-target="#sql-modal"
-          title="Ad-hoc SQL query (runs against agg / slices tables)">
-    SQL
-  </button>
+  <!-- SQL -->
+  <button class="nav-btn" data-bs-toggle="modal" data-bs-target="#sql-modal" title="Ad-hoc SQL">SQL</button>
 
-  <!-- Light / dark toggle -->
-  <button class="nav-btn" id="theme-btn" title="Toggle light/dark theme">🌙</button>
+  <div class="nav-sep"></div>
 
-  <!-- Alerts bell with badge -->
+  <!-- Perspective zoom controls (scales the viewer content only) -->
+  <button class="nav-btn" id="zoom-out-btn" title="Zoom out">−</button>
+  <span id="zoom-label">100%</span>
+  <button class="nav-btn" id="zoom-in-btn"  title="Zoom in">+</button>
+
+  <div class="nav-sep"></div>
+
+  <!-- Fullscreen -->
+  <button class="nav-btn" id="fullscreen-btn" title="Fullscreen">⛶</button>
+
+  <!-- Theme toggle -->
+  <button class="nav-btn" id="theme-btn" title="Toggle light/dark">🌙</button>
+
+  <!-- Alerts bell -->
   <div style="position:relative">
-    <button class="nav-btn" id="alerts-toggle" title="View alerts">🔔</button>
-    <span id="alert-badge"
-          class="position-absolute badge rounded-pill bg-danger"
+    <button class="nav-btn" id="alerts-toggle" title="Alerts">🔔</button>
+    <span id="alert-badge" class="position-absolute badge rounded-pill bg-danger"
           style="top:-5px;right:-5px;font-size:.6rem;min-width:16px;display:none">0</span>
   </div>
 
@@ -238,31 +245,24 @@
 
 <!-- ═══════════════════════════════════════════════════ Perspective pane -->
 <div id="perspective-wrapper">
-
-  <!-- Spinner shown until first data arrives -->
   <div id="psp-loading">
     <div class="psp-spinner"></div>
     <div>Connecting to HydroCube…</div>
   </div>
-
-  <!-- Fullscreen / zoom toggle -->
-  <button id="zoom-btn" class="btn btn-sm btn-secondary">⛶ Zoom</button>
-
-  <!-- The Perspective custom element — fills the wrapper entirely -->
-  <perspective-viewer id="perspective-viewer" theme="Pro Light"></perspective-viewer>
-
+  <!-- Transform applied to this host div, never directly to perspective-viewer,
+       so Perspective's internal measurements always see unscaled dimensions. -->
+  <div id="psp-zoom-host">
+    <perspective-viewer id="perspective-viewer" theme="Pro Light"></perspective-viewer>
+  </div>
 </div>
 
 
 <!-- ═══════════════════════════════════════════════════ Status strip -->
 <div id="status-strip">
-  <span>
-    <span class="sse-dot" id="sse-dot"></span>
-    <span id="sse-label">Connecting…</span>
-  </span>
+  <span><span class="sse-dot" id="sse-dot"></span><span id="sse-label">Connecting…</span></span>
   <span>Window: <strong id="stat-window">—</strong></span>
   <span>Rate: <strong id="stat-rate">0 Δ/s</strong></span>
-  <span>Cutoff: <strong id="stat-cutoff">—</strong></span>
+  <span>Compacted: <strong id="stat-cutoff">—</strong></span>
   <span class="ms-auto">Clients: <strong id="stat-clients">—</strong></span>
   <span>Uptime: <strong id="stat-uptime">—</strong></span>
 </div>
@@ -274,17 +274,11 @@
     <span class="fw-semibold">🔔 Alerts</span>
     <button class="btn btn-sm btn-outline-secondary" id="alerts-close">✕</button>
   </div>
-
-  <!-- Active alerts (populated by alert-polling JS; placeholder until wired up) -->
   <div id="alerts-active" class="card-body border-bottom py-2" style="display:none">
     <div class="fw-semibold small mb-2 text-danger">Active</div>
     <div id="alerts-active-list" class="d-flex flex-column gap-2"></div>
   </div>
-
-  <!-- History -->
-  <div id="alerts-history" class="card-body py-3 text-center text-muted small fst-italic">
-    No alerts.
-  </div>
+  <div class="card-body py-3 text-center text-muted small fst-italic">No alerts.</div>
   <div class="card-footer py-1 small text-center">
     <a href="#" class="text-muted">Configure alert rules…</a>
   </div>
@@ -295,21 +289,17 @@
 <div class="modal fade" id="sql-modal" tabindex="-1" aria-labelledby="sql-modal-label">
   <div class="modal-dialog modal-lg modal-dialog-centered">
     <div class="modal-content">
-
       <div class="modal-header py-2">
         <h6 class="modal-title fw-semibold" id="sql-modal-label">Ad-hoc SQL Query</h6>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
       </div>
-
       <div class="modal-body pb-2">
         <textarea id="sql-editor" class="form-control font-monospace" rows="5"
-                  style="font-size:.84rem; resize:vertical">SELECT * FROM agg LIMIT 100</textarea>
+                  style="font-size:.84rem;resize:vertical">SELECT * FROM agg LIMIT 100</textarea>
         <div class="text-muted small mt-1">
-          Tables: <code>agg</code> (current aggregated view) ·
-                  <code>slices</code> (raw per-window data)
+          Tables: <code>agg</code> (aggregated view) · <code>slices</code> (raw window data)
         </div>
       </div>
-
       <div class="modal-footer py-2 d-flex justify-content-between align-items-center gap-2">
         <span id="sql-meta" class="small text-muted"></span>
         <div class="d-flex gap-2">
@@ -317,13 +307,8 @@
           <button class="btn btn-sm btn-primary" id="run-query-btn">▶ Run</button>
         </div>
       </div>
-
-      <!-- Result area — hidden until a query runs -->
-      <div id="sql-result"
-           class="border-top font-monospace small px-3 py-2"
-           style="display:none; max-height:280px; overflow-y:auto">
-      </div>
-
+      <div id="sql-result" class="border-top font-monospace small px-3 py-2"
+           style="display:none;max-height:280px;overflow-y:auto"></div>
     </div>
   </div>
 </div>
@@ -334,36 +319,39 @@
 <script src="/assets/codemirror/codemirror.min.js"></script>
 <script src="/assets/codemirror/sql.min.js"></script>
 
-<!--
-  Perspective is loaded as an ES module. The imports register:
-    - perspective              : core WASM engine + table API
-    - perspective-viewer       : <perspective-viewer> custom element
-    - perspective-viewer-datagrid : the real-time data grid plugin
--->
 <script type="module">
 import perspective from '/assets/perspective/cdn/perspective.js';
 import '/assets/perspective/cdn/perspective-viewer.js';
 import '/assets/perspective/cdn/perspective-viewer-datagrid.js';
+import '/assets/perspective/cdn/perspective-viewer-d3fc.js';
+
+// ── Constants ─────────────────────────────────────────────────────────────────
+const CUBE        = '{{ cube_name }}';
+const VIEWS_KEY   = `hc_views_${CUBE}`;
+const LAST_VIEW_KEY = `hc_last_view_${CUBE}`;
+const ZOOM_KEY    = 'hc_zoom';
+const ZOOM_STEPS  = [0.5, 0.67, 0.75, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0];
 
 // ── Theme ─────────────────────────────────────────────────────────────────────
 const THEMES = {
   light: '/assets/bootswatch/flatly.min.css',
   dark:  '/assets/bootswatch/darkly.min.css',
 };
-let currentTheme = localStorage.getItem('hc_theme') || 'light';
-
-const PSP_CSS = {
+const PSP_THEMES = {
   light: '/assets/perspective/css/pro.css',
   dark:  '/assets/perspective/css/pro-dark.css',
 };
+let currentTheme = localStorage.getItem('hc_theme') || 'light';
+
+const viewerEl   = document.getElementById('perspective-viewer');
+const pspLoading = document.getElementById('psp-loading');
 
 function applyTheme(t) {
-  document.getElementById('theme-css').href = THEMES[t] ?? THEMES.light;
-  document.getElementById('psp-theme-css').href = PSP_CSS[t] ?? PSP_CSS.light;
+  document.getElementById('theme-css').href     = THEMES[t]     ?? THEMES.light;
+  document.getElementById('psp-theme-css').href = PSP_THEMES[t] ?? PSP_THEMES.light;
   document.documentElement.setAttribute('data-bs-theme', t);
   document.getElementById('theme-btn').textContent = t === 'dark' ? '☀️' : '🌙';
-  const viewer = document.getElementById('perspective-viewer');
-  if (viewer) viewer.setAttribute('theme', t === 'dark' ? 'Pro Dark' : 'Pro Light');
+  if (viewerEl) viewerEl.setAttribute('theme', t === 'dark' ? 'Pro Dark' : 'Pro Light');
   currentTheme = t;
   localStorage.setItem('hc_theme', t);
 }
@@ -373,14 +361,72 @@ document.getElementById('theme-btn').addEventListener('click', () =>
   applyTheme(currentTheme === 'dark' ? 'light' : 'dark'));
 
 
-// ── Perspective init ───────────────────────────────────────────────────────────
-const viewerEl  = document.getElementById('perspective-viewer');
-const pspLoading = document.getElementById('psp-loading');
+// ── Perspective zoom ──────────────────────────────────────────────────────────
+// The transform is applied to #psp-zoom-host, NOT to perspective-viewer itself.
+// This ensures Perspective's internal getBoundingClientRect() / offsetWidth calls
+// always see the true unscaled element dimensions, preventing column-width drift
+// that occurs when scale() is placed directly on the custom element.
+let zoomIdx = ZOOM_STEPS.indexOf(
+  parseFloat(localStorage.getItem(ZOOM_KEY) || '1')
+);
+if (zoomIdx < 0) zoomIdx = ZOOM_STEPS.indexOf(1.0);
 
+const pspWrapper  = document.getElementById('perspective-wrapper');
+const pspZoomHost = document.getElementById('psp-zoom-host');
+
+function applyZoom() {
+  const z = ZOOM_STEPS[zoomIdx];
+  const w = pspWrapper.clientWidth;
+  const h = pspWrapper.clientHeight;
+  // Size the zoom host to unscaled dimensions; perspective-viewer fills it at 100%.
+  pspZoomHost.style.width     = Math.round(w / z) + 'px';
+  pspZoomHost.style.height    = Math.round(h / z) + 'px';
+  pspZoomHost.style.transform = `scale(${z})`;
+  document.getElementById('zoom-label').textContent = Math.round(z * 100) + '%';
+  document.getElementById('zoom-out-btn').disabled = (zoomIdx === 0);
+  document.getElementById('zoom-in-btn').disabled  = (zoomIdx === ZOOM_STEPS.length - 1);
+  localStorage.setItem(ZOOM_KEY, z);
+}
+
+// Re-apply on window resize. Debounce to prevent ResizeObserver feedback loops.
+let _zoomResizeTimer;
+new ResizeObserver(() => {
+  clearTimeout(_zoomResizeTimer);
+  _zoomResizeTimer = setTimeout(applyZoom, 80);
+}).observe(pspWrapper);
+
+document.getElementById('zoom-out-btn').addEventListener('click', () => {
+  if (zoomIdx > 0) { zoomIdx--; applyZoom(); }
+});
+document.getElementById('zoom-in-btn').addEventListener('click', () => {
+  if (zoomIdx < ZOOM_STEPS.length - 1) { zoomIdx++; applyZoom(); }
+});
+
+applyZoom();
+
+
+// ── Fullscreen ────────────────────────────────────────────────────────────────
+const wrapper      = document.getElementById('perspective-wrapper');
+const fullscreenBtn = document.getElementById('fullscreen-btn');
+
+fullscreenBtn.addEventListener('click', () => {
+  if (!document.fullscreenElement) {
+    wrapper.requestFullscreen().catch(() => {});
+  } else {
+    document.exitFullscreen();
+  }
+});
+
+document.addEventListener('fullscreenchange', () => {
+  fullscreenBtn.textContent = document.fullscreenElement ? '✕' : '⛶';
+  fullscreenBtn.title       = document.fullscreenElement ? 'Exit fullscreen' : 'Fullscreen';
+});
+
+
+// ── Perspective table ─────────────────────────────────────────────────────────
 let worker = null;
 let table  = null;
 
-// Decode a base64 string to an ArrayBuffer (Arrow IPC format).
 function b64ToBuffer(b64) {
   const raw = atob(b64);
   const buf = new Uint8Array(raw.length);
@@ -388,30 +434,31 @@ function b64ToBuffer(b64) {
   return buf.buffer;
 }
 
-// Load (or replace) the Perspective table from the /api/snapshot endpoint.
-// Called on startup and after each SSE delta event.
+// First load: fetch full snapshot, create indexed table, attach to viewer.
 async function loadSnapshot() {
   try {
     const resp = await fetch('/api/snapshot');
-    if (!resp.ok) return;
+    if (!resp.ok) return false;
     const data = await resp.json();
-    if (!data.arrow_ipc_b64 || data.row_count === 0) return;
+    if (!data.arrow_ipc_b64 || data.row_count === 0) return false;
 
     const buf = b64ToBuffer(data.arrow_ipc_b64);
 
     if (!table) {
-      // First load — create the worker + table, attach to the viewer.
       worker = await perspective.worker();
-      table  = await worker.table(buf);
+      // _key is auto-injected by the engine as CONCAT_WS('|', ...dimensions)
+      // Using it as the Perspective index enables true row-level upserts.
+      table = await worker.table(buf, { index: '_key' });
       await viewerEl.load(table);
       pspLoading.classList.add('hidden');
+      await restoreLastView();
     } else {
-      // Subsequent updates — replace all rows (full aggregated state).
+      // Periodic full resync (handles deletions / any drift from delta path).
       await table.replace(buf);
     }
+    return true;
   } catch (err) {
     console.warn('[HydroCube] snapshot error:', err);
-    // Show error in loading overlay instead of a blank screen.
     if (!table) {
       pspLoading.innerHTML =
         `<div class="text-danger small px-4 text-center">
@@ -419,33 +466,48 @@ async function loadSnapshot() {
            <span class="text-muted">Check the browser console for details.</span>
          </div>`;
     }
+    return false;
   }
 }
 
 loadSnapshot();
 
+// Full resync every 60 s to handle any row deletions / compaction drift.
+setInterval(() => { if (table) loadSnapshot(); }, 60_000);
 
-// ── Delta rate counter ─────────────────────────────────────────────────────────
+
+// ── Delta rate ────────────────────────────────────────────────────────────────
 let deltaTs = [];
 function recordDelta() { deltaTs.push(Date.now()); }
 
 setInterval(() => {
-  const cutoff = Date.now() - 1000;
-  deltaTs = deltaTs.filter(t => t > cutoff);
+  const now = Date.now();
+  deltaTs = deltaTs.filter(t => now - t < 1000);
   document.getElementById('stat-rate').textContent = deltaTs.length + ' Δ/s';
 }, 500);
 
 
-// ── SSE connection ─────────────────────────────────────────────────────────────
+// ── SSE — true upserts via table.update() ─────────────────────────────────────
 const sseDot   = document.getElementById('sse-dot');
 const sseLabel = document.getElementById('sse-label');
 
 function connectSSE() {
   const es = new EventSource('/api/stream');
 
-  es.addEventListener('delta', () => {
+  es.addEventListener('delta', async (event) => {
     recordDelta();
-    loadSnapshot();     // SSE delta = trigger a fresh snapshot fetch + replace
+    if (table && event.data) {
+      try {
+        // Use the delta Arrow IPC directly — no snapshot round-trip needed.
+        // _key index lets Perspective upsert only the changed rows.
+        await table.update(b64ToBuffer(event.data));
+      } catch (err) {
+        console.warn('[HydroCube] delta update failed, resyncing:', err);
+        await loadSnapshot();
+      }
+    } else {
+      await loadSnapshot();
+    }
   });
 
   es.onopen = () => {
@@ -464,90 +526,91 @@ function connectSSE() {
 connectSSE();
 
 
-// ── Status polling (every 5 s) ─────────────────────────────────────────────────
-function fmtUptime(secs) {
-  if (secs >= 3600) return `${Math.floor(secs/3600)}h ${Math.floor((secs%3600)/60)}m`;
-  return `${Math.floor(secs/60)}m ${secs%60}s`;
+// ── Status polling ────────────────────────────────────────────────────────────
+function fmtUptime(s) {
+  if (s >= 3600) return `${Math.floor(s/3600)}h ${Math.floor((s%3600)/60)}m`;
+  return `${Math.floor(s/60)}m ${s%60}s`;
 }
 
 function pollStatus() {
-  fetch('/api/status')
-    .then(r => r.json())
-    .then(s => {
-      document.getElementById('stat-window').textContent  = s.window_id          ?? '—';
-      document.getElementById('stat-cutoff').textContent  = s.compaction_cutoff  ?? '—';
-      document.getElementById('stat-clients').textContent = s.sse_client_count   ?? '—';
-      document.getElementById('stat-uptime').textContent  = fmtUptime(s.uptime_secs ?? 0);
-    })
-    .catch(() => {});
+  fetch('/api/status').then(r => r.json()).then(s => {
+    document.getElementById('stat-window').textContent  = s.window_id ?? '—';
+    document.getElementById('stat-cutoff').textContent  =
+      s.compaction_cutoff > 0 ? `W#${s.compaction_cutoff}` : 'none';
+    document.getElementById('stat-clients').textContent = s.sse_client_count ?? '—';
+    document.getElementById('stat-uptime').textContent  = fmtUptime(s.uptime_secs ?? 0);
+  }).catch(() => {});
 }
 
 pollStatus();
 setInterval(pollStatus, 5000);
 
 
-// ── Alerts panel ───────────────────────────────────────────────────────────────
+// ── Alerts panel ──────────────────────────────────────────────────────────────
 const alertsPanel = document.getElementById('alerts-panel');
 
 document.getElementById('alerts-toggle').addEventListener('click', () => {
   alertsPanel.classList.toggle('show');
-  // Clear badge when opened
-  if (alertsPanel.classList.contains('show')) {
+  if (alertsPanel.classList.contains('show'))
     document.getElementById('alert-badge').style.display = 'none';
-  }
 });
 document.getElementById('alerts-close').addEventListener('click', () =>
   alertsPanel.classList.remove('show'));
 
 
-// ── Zoom (native Fullscreen API) ───────────────────────────────────────────────
-const zoomBtn = document.getElementById('zoom-btn');
-const wrapper = document.getElementById('perspective-wrapper');
-
-zoomBtn.addEventListener('click', () => {
-  if (!document.fullscreenElement) {
-    wrapper.requestFullscreen().catch(() => {});
-  } else {
-    document.exitFullscreen();
-  }
-});
-
-document.addEventListener('fullscreenchange', () => {
-  zoomBtn.textContent = document.fullscreenElement ? '✕ Exit' : '⛶ Zoom';
-});
-
-
-// ── Saved views ────────────────────────────────────────────────────────────────
-// Persist and restore the Perspective viewer config (column layout, pivots, etc.)
-// from localStorage so users don't lose their grid setup on reload.
-const VIEWS_KEY = 'hc_views';
-
+// ── Views — save / restore per cube ──────────────────────────────────────────
 function loadViews() {
   try { return JSON.parse(localStorage.getItem(VIEWS_KEY) || '{}'); } catch { return {}; }
 }
-function saveViews(views) {
-  localStorage.setItem(VIEWS_KEY, JSON.stringify(views));
+function saveViews(v) { localStorage.setItem(VIEWS_KEY, JSON.stringify(v)); }
+
+function setActiveViewLabel(name) {
+  document.getElementById('current-view-label').textContent = name;
+  document.querySelectorAll('#views-menu [data-view]').forEach(el =>
+    el.classList.toggle('active', el.dataset.view === name));
+  localStorage.setItem(LAST_VIEW_KEY, name);
 }
 
 async function applyView(name) {
+  if (name === '__default__') {
+    await viewerEl.reset();
+    setActiveViewLabel('Default View');
+    return;
+  }
   const views = loadViews();
-  if (!views[name] || !viewerEl) return;
+  if (!views[name]) return;
   try {
     await viewerEl.restore(views[name]);
-    document.getElementById('current-view-label').textContent = name;
+    setActiveViewLabel(name);
   } catch (e) {
     console.warn('[HydroCube] restore view failed:', e);
   }
 }
 
-// Wire up saved-view menu items
+// Restore the last-used view after first data load.
+async function restoreLastView() {
+  // Rebuild dropdown from stored views
+  const views = loadViews();
+  const menu  = document.getElementById('views-menu');
+  const divider = document.getElementById('views-divider');
+  for (const name of Object.keys(views)) {
+    if (!menu.querySelector(`[data-view="${CSS.escape(name)}"]`)) {
+      const li = document.createElement('li');
+      li.innerHTML = `<a class="dropdown-item" href="#" data-view="${name}">${name}</a>`;
+      menu.insertBefore(li, divider);
+    }
+  }
+  const last = localStorage.getItem(LAST_VIEW_KEY);
+  if (last && last !== '__default__' && views[last]) {
+    await applyView(last);
+  }
+}
+
 document.getElementById('views-menu').addEventListener('click', async (e) => {
   const item = e.target.closest('[data-view]');
   if (!item) return;
   e.preventDefault();
   await applyView(item.dataset.view);
-  document.querySelectorAll('#views-menu .dropdown-item').forEach(el =>
-    el.classList.toggle('active', el === item));
 });
 
 document.getElementById('save-view-btn').addEventListener('click', async (e) => {
@@ -555,53 +618,38 @@ document.getElementById('save-view-btn').addEventListener('click', async (e) => 
   if (!viewerEl) return;
   const name = prompt('Save view as:', 'My View');
   if (!name?.trim()) return;
-  const config = await viewerEl.save();
+  const cfg   = await viewerEl.save();
   const views = loadViews();
-  views[name] = config;
+  views[name] = cfg;
   saveViews(views);
-  // Add to dropdown if not already there
   const menu = document.getElementById('views-menu');
+  const divider = document.getElementById('views-divider');
   if (!menu.querySelector(`[data-view="${CSS.escape(name)}"]`)) {
     const li = document.createElement('li');
     li.innerHTML = `<a class="dropdown-item" href="#" data-view="${name}">${name}</a>`;
-    menu.insertBefore(li, menu.querySelector('hr'));
+    menu.insertBefore(li, divider);
   }
-  document.getElementById('current-view-label').textContent = name;
+  setActiveViewLabel(name);
 });
 
 
-// ── Ad-hoc SQL ─────────────────────────────────────────────────────────────────
+// ── SQL ───────────────────────────────────────────────────────────────────────
 let sqlEditor;
 if (typeof CodeMirror !== 'undefined') {
   sqlEditor = CodeMirror.fromTextArea(document.getElementById('sql-editor'), {
-    mode: 'text/x-sql',
-    lineNumbers: true,
-    tabSize: 2,
-    indentWithTabs: false,
-    theme: 'default',
+    mode: 'text/x-sql', lineNumbers: true, tabSize: 2, indentWithTabs: false,
   });
 }
 
-function getSql() {
-  return sqlEditor
-    ? sqlEditor.getValue()
-    : document.getElementById('sql-editor').value;
-}
-
 document.getElementById('run-query-btn').addEventListener('click', async function () {
-  const sql = getSql().trim();
+  const sql = (sqlEditor ? sqlEditor.getValue() : document.getElementById('sql-editor').value).trim();
   if (!sql) return;
-
-  const btn    = this;
-  const meta   = document.getElementById('sql-meta');
+  const btn = this;
+  const meta = document.getElementById('sql-meta');
   const result = document.getElementById('sql-result');
-
-  btn.disabled    = true;
-  btn.textContent = '⏳';
-  meta.textContent = '';
-  meta.style.color = '';
+  btn.disabled = true; btn.textContent = '⏳';
+  meta.textContent = ''; meta.style.color = '';
   result.style.display = 'none';
-
   try {
     const resp = await fetch('/api/query', {
       method: 'POST',
@@ -610,17 +658,14 @@ document.getElementById('run-query-btn').addEventListener('click', async functio
     });
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.error ?? resp.statusText);
-
     meta.textContent = `${data.row_count} row${data.row_count === 1 ? '' : 's'} returned`;
     result.style.display = '';
-    result.innerHTML = `<span class="text-muted">Arrow IPC — ${data.row_count} rows.
-      (Perspective query rendering coming soon)</span>`;
+    result.innerHTML = `<span class="text-muted">Arrow IPC — ${data.row_count} rows returned.</span>`;
   } catch (err) {
     meta.textContent = 'Error: ' + err.message;
     meta.style.color = 'var(--bs-danger)';
   } finally {
-    btn.disabled    = false;
-    btn.textContent = '▶ Run';
+    btn.disabled = false; btn.textContent = '▶ Run';
   }
 });
 

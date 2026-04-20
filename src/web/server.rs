@@ -14,6 +14,7 @@ use minijinja::Environment;
 use tokio::sync::broadcast;
 use tracing::info;
 
+use crate::aggregation::sql_gen::AggSqlGenerator;
 use crate::config::CubeConfig;
 use crate::db_manager::DbManager;
 use crate::error::{HcError, HcResult};
@@ -90,9 +91,16 @@ pub async fn start_server(
     broadcast_tx: broadcast::Sender<DeltaEvent>,
     port: u16,
 ) -> HcResult<()> {
+    // Pre-compute the snapshot SQL with synthetic _key column so the snapshot
+    // endpoint returns the same schema as the engine's delta broadcasts.
+    let snapshot_sql = AggSqlGenerator::from_user_sql(&config.aggregation.sql)
+        .map(|g| g.full_aggregation_sql_with_key())
+        .unwrap_or_else(|_| config.aggregation.sql.clone());
+
     let state = Arc::new(AppState {
         db,
         config,
+        snapshot_sql,
         start_time: std::time::Instant::now(),
         broadcast_tx,
     });

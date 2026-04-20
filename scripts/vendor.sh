@@ -109,6 +109,10 @@ PSP_DG_BASE="https://cdn.jsdelivr.net/npm/@finos/perspective-viewer-datagrid@${P
 download "${PSP_DG_BASE}/dist/cdn/perspective-viewer-datagrid.js" \
          "$STATIC_DIR/perspective/cdn/perspective-viewer-datagrid.js"
 
+PSP_D3_BASE="https://cdn.jsdelivr.net/npm/@finos/perspective-viewer-d3fc@${PERSPECTIVE_VERSION}"
+download "${PSP_D3_BASE}/dist/cdn/perspective-viewer-d3fc.js" \
+         "$STATIC_DIR/perspective/cdn/perspective-viewer-d3fc.js"
+
 echo ""
 echo "Done. All assets written to $STATIC_DIR/"
 echo ""

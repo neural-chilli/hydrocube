@@ -75,7 +75,7 @@ impl CompactionThread {
     /// One compaction cycle:
     ///
     /// 1. Read current window ID from atomic.
-    /// 2. Calculate cutoff = current - safety_buffer.
+    /// 2. Calculate cutoff = current - max(retention_windows, safety_buffer).
     /// 3. Skip if cutoff <= current compaction_cutoff.
     /// 4. Export to Parquet (best-effort, warn on failure).
     /// 5. Delete old slices from DuckDB.
@@ -87,17 +87,34 @@ impl CompactionThread {
 
         let current_window = WINDOW_ID.load(Ordering::Acquire);
 
-        // Guard against underflow on a fresh start.
-        if current_window < SAFETY_BUFFER {
+        // Calculate how many windows the configured retention period spans.
+        // This is the minimum look-back we must preserve in the slices table
+        // so that the full aggregation query always covers the full retention window.
+        let retention_windows: u64 = match self.config.retention.parse_duration_seconds() {
+            Ok(secs) => {
+                let interval_secs = (self.config.window.interval_ms as f64 / 1000.0).max(0.001);
+                (secs as f64 / interval_secs).ceil() as u64
+            }
+            Err(_) => {
+                warn!(target: "compaction", "could not parse retention duration; defaulting to 86400 windows");
+                86_400
+            }
+        };
+
+        // The delete cutoff must respect BOTH the retention period and the
+        // safety buffer.  We keep at least `lookback` windows of raw slices.
+        let lookback = retention_windows.max(SAFETY_BUFFER);
+
+        if current_window <= lookback {
             debug!(
                 target: "compaction",
-                "current_window={} < safety_buffer={}, skipping",
-                current_window, SAFETY_BUFFER
+                "current_window={} <= lookback={} (retention_windows={}, safety_buffer={}), skipping",
+                current_window, lookback, retention_windows, SAFETY_BUFFER
             );
             return Ok(());
         }
 
-        let cutoff = current_window - SAFETY_BUFFER;
+        let cutoff = current_window - lookback;
         let current_cutoff = compaction_cutoff();
 
         if cutoff <= current_cutoff {

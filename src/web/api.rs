@@ -27,6 +27,9 @@ use std::sync::atomic::Ordering;
 pub struct AppState {
     pub db: DbManager,
     pub config: CubeConfig,
+    /// Full aggregation SQL with synthetic `_key` column injected.
+    /// Used by the snapshot endpoint so Perspective's `{ index: '_key' }` is valid.
+    pub snapshot_sql: String,
     pub start_time: Instant,
     pub broadcast_tx: broadcast::Sender<DeltaEvent>,
 }
@@ -150,8 +153,7 @@ pub struct SnapshotResponse {
 pub async fn snapshot_handler(
     State(state): State<Arc<AppState>>,
 ) -> ApiResult<Json<SnapshotResponse>> {
-    let sql = &state.config.aggregation.sql;
-    let batches = state.db.query_arrow(sql).await.map_err(ApiError::from)?;
+    let batches = state.db.query_arrow(&state.snapshot_sql).await.map_err(ApiError::from)?;
 
     let (row_count, arrow_ipc_b64) = concat_and_serialize(&batches)?;
 
