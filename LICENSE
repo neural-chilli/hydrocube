@@ -1,0 +1,119 @@
+HYDROCUBE SOURCE-AVAILABLE LICENSE AGREEMENT
+
+Copyright (c) Joseph Frost. All rights reserved.
+
+This License Agreement (“Agreement”) governs your use of the HydroCube software, including all source code, object code, documentation, and related materials (collectively, the “Licensed Work”).
+
+By accessing, copying, or using the Licensed Work, you agree to be bound by the terms of this Agreement.
+
+---
+
+1. DEFINITIONS
+
+“Licensor” means Joseph Frost.
+
+“Licensed Work” means the HydroCube software.
+
+“Non-Production Use” means use solely for development, testing, staging, evaluation, or internal research purposes, and not for processing live data, supporting business operations, or delivering services to end users.
+
+“Production Use” means any use of the Licensed Work in a live or operational environment, including processing real user data, supporting business operations, or generating commercial value.
+
+“Commercial License” means a separate written agreement between you and the Licensor granting rights for Production Use.
+
+---
+
+2. GRANT OF RIGHTS
+
+Subject to the terms of this Agreement, the Licensor grants you a limited, non-exclusive, non-transferable, non-sublicensable, revocable license to:
+
+(a) Access, inspect, and read the source code of the Licensed Work; and
+(b) Use the Licensed Work solely for Non-Production Use.
+
+No other rights are granted.
+
+---
+
+3. RESTRICTIONS
+
+You may not, without an explicit Commercial License from the Licensor:
+
+(a) Use the Licensed Work for any Production Use;
+(b) Modify, adapt, translate, or create derivative works of the Licensed Work;
+(c) Copy, reproduce, distribute, publish, sublicense, rent, lease, or sell the Licensed Work, in whole or in part, except as strictly necessary for permitted Non-Production Use;
+(d) Use the Licensed Work as part of, or in connection with, any product or service that competes with HydroCube;
+(e) Remove, alter, or obscure any proprietary notices contained in the Licensed Work.
+
+---
+
+4. COMMERCIAL LICENSE
+
+Production Use of the Licensed Work requires a separate Commercial License from the Licensor. No rights for Production Use are granted under this Agreement.
+
+---
+
+5. OWNERSHIP AND RESERVATION OF RIGHTS
+
+The Licensed Work is licensed, not sold. The Licensor retains all right, title, and interest in and to the Licensed Work, including all intellectual property rights.
+
+All rights not expressly granted under this Agreement are reserved by the Licensor.
+
+No rights are granted by implication, estoppel, or otherwise.
+
+---
+
+6. NO FUTURE LICENSE CONVERSION
+
+This Agreement does not provide for, and explicitly excludes, any future conversion of the Licensed Work to an open source license. The Licensed Work will remain subject to proprietary licensing unless the Licensor explicitly states otherwise in a separate written agreement.
+
+---
+
+7. SOURCE CODE ESCROW
+
+The Licensor shall deposit the source code of the Licensed Work with a reputable third-party escrow agent under a formal escrow agreement prior to or concurrently with entering into the first Commercial License agreement.
+
+All customers who have entered into a valid Commercial License agreement with the Licensor shall be named as beneficiaries of the escrow arrangement as a standard term of such Commercial License.
+
+The Licensor shall update the escrow deposit promptly following each material release of the Licensed Work to ensure that the deposited source code remains current.
+
+The escrow agreement shall provide for release of the source code to beneficiaries upon the occurrence of defined release conditions, including:
+
+(a) Insolvency of the Licensor; or
+(b) Permanent cessation of trading by the Licensor.
+
+Upon release, beneficiaries shall receive sufficient rights to use, modify, and maintain the released source code solely as necessary to continue operating the Licensed Work for their own business purposes, including through third-party contractors acting on their behalf.
+
+The terms and operation of the escrow arrangement shall be governed by a separate escrow agreement with the escrow agent, provided that such terms shall not materially diminish the protections described in this Section.
+
+---
+
+8. TERMINATION
+
+This Agreement terminates automatically if you breach any of its terms.
+
+Upon termination, you must immediately cease all use of the Licensed Work and destroy all copies in your possession or control.
+
+---
+
+9. DISCLAIMER OF WARRANTIES
+
+THE LICENSED WORK IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT.
+
+---
+
+10. LIMITATION OF LIABILITY
+
+TO THE MAXIMUM EXTENT PERMITTED BY LAW, IN NO EVENT SHALL THE LICENSOR BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, OR ANY LOSS OF PROFITS, REVENUE, DATA, OR USE, ARISING OUT OF OR IN CONNECTION WITH THE LICENSED WORK OR THIS AGREEMENT, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
+
+TO THE MAXIMUM EXTENT PERMITTED BY LAW, THE LICENSOR’S TOTAL AGGREGATE LIABILITY UNDER THIS AGREEMENT SHALL NOT EXCEED THE TOTAL FEES PAID BY YOU TO THE LICENSOR FOR THE LICENSED WORK DURING THE TWELVE (12) MONTHS IMMEDIATELY PRECEDING THE EVENT GIVING RISE TO THE CLAIM.
+
+---
+
+11. GOVERNING LAW
+
+This Agreement and any dispute or claim arising out of or in connection with it shall be governed by and construed in accordance with the laws of England and Wales.
+
+The courts of England and Wales shall have exclusive jurisdiction over any disputes arising under this Agreement.
+
+---
+
+END OF LICENSE
