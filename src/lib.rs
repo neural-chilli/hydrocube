@@ -19,3 +19,4 @@ pub mod shutdown;
 pub mod transform;
 pub mod web;
 pub mod hooks;
+pub mod identity;
