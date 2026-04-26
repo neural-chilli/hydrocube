@@ -1,71 +1,68 @@
 # cube.test.yaml — Local test config (paths under .local/, gitignored)
+#
+# Start the test environment with:
+#   ./scripts/run-test-env.sh
+#
+# The UI port (8081) is passed via --ui-port on the CLI, not in this file.
+
 name: trading_positions
 description: Real-time position aggregation by book
 
-source:
-  type: kafka
-  brokers: ["localhost:9092"]
-  topic: "trades.executed"
-  group_id: "hydrocube-test"
-  format: json
+tables:
+  - name: trades
+    mode: append
+    schema:
+      columns:
+        - { name: trade_id,        type: VARCHAR   }
+        - { name: book,            type: VARCHAR   }
+        - { name: desk,            type: VARCHAR   }
+        - { name: instrument,      type: VARCHAR   }
+        - { name: instrument_type, type: VARCHAR   }
+        - { name: currency,        type: VARCHAR   }
+        - { name: quantity,        type: DOUBLE    }
+        - { name: price,           type: DOUBLE    }
+        - { name: notional,        type: DOUBLE    }
+        - { name: side,            type: VARCHAR   }
+        - { name: trade_time,      type: TIMESTAMP }
 
-schema:
-  columns:
-    - name: trade_id
-      type: VARCHAR
-    - name: book
-      type: VARCHAR
-    - name: desk
-      type: VARCHAR
-    - name: instrument
-      type: VARCHAR
-    - name: instrument_type
-      type: VARCHAR
-    - name: currency
-      type: VARCHAR
-    - name: quantity
-      type: DOUBLE
-    - name: price
-      type: DOUBLE
-    - name: notional
-      type: DOUBLE
-    - name: side
-      type: VARCHAR
-    - name: trade_time
-      type: TIMESTAMP
+sources:
+  - type: kafka
+    table: trades
+    brokers: ["localhost:9092"]
+    topic: "trades.executed"
+    group_id: "hydrocube-test"
+    format: json
 
 aggregation:
-  sql: |
-    SELECT
-      book,
-      desk,
-      instrument_type,
-      currency,
-      SUM(notional) AS total_notional,
-      SUM(CASE WHEN side = 'BUY' THEN quantity ELSE -quantity END) AS net_quantity,
-      COUNT(*) AS trade_count,
-      AVG(price) AS avg_price,
-      MAX(trade_time) AS max_trade_time
-    FROM slices
-    GROUP BY book, desk, instrument_type, currency
+  key_columns: [book, desk, instrument_type, currency]
+  compaction:
+    interval: "1m"
+  publish:
+    sql: |
+      SELECT
+        book,
+        desk,
+        instrument_type,
+        currency,
+        SUM(notional) AS total_notional,
+        SUM(CASE WHEN side = 'BUY' THEN quantity ELSE -quantity END) AS net_quantity,
+        COUNT(*) AS trade_count,
+        AVG(price) AS avg_price,
+        MAX(trade_time) AS max_trade_time
+      FROM trades
+      GROUP BY book, desk, instrument_type, currency
 
 window:
   interval_ms: 1000
 
-compaction:
-  interval_windows: 60
-
 retention:
-  duration: 1d
-  parquet_path: ".local/slices"
+  raw:
+    duration: 1d
+    parquet_path: ".local/slices"
 
 persistence:
   enabled: true
   path: ".local/positions.db"
   flush_interval: 10
-
-ui:
-  enabled: true
-  port: 8081
 
 log_level: debug
