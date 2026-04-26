@@ -1,9 +1,5 @@
 // tests/compaction_test.rs
 
-use hydrocube::config::{
-    AggregationConfig, ColumnDef, CompactionConfig, CubeConfig, PersistenceConfig, RetentionConfig,
-    SchemaConfig, SourceConfig, WindowConfig,
-};
 use hydrocube::db_manager::DbManager;
 use hydrocube::persistence;
 use hydrocube::retention::RetentionManager;
@@ -12,52 +8,24 @@ use hydrocube::retention::RetentionManager;
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Build a minimal CubeConfig suitable for compaction tests.
-fn test_config() -> CubeConfig {
-    CubeConfig {
-        name: "test_cube".into(),
-        description: None,
-        source: SourceConfig {
-            source_type: "test".into(),
-            brokers: None,
-            topic: None,
-            group_id: None,
-            format: "json".into(),
-        },
-        schema: SchemaConfig {
-            columns: vec![
-                ColumnDef {
-                    name: "trade_id".into(),
-                    col_type: "VARCHAR".into(),
-                },
-                ColumnDef {
-                    name: "quantity".into(),
-                    col_type: "DOUBLE".into(),
-                },
-            ],
-        },
-        transform: None,
-        aggregation: AggregationConfig {
-            sql: "SELECT SUM(quantity) FROM slices".into(),
-        },
-        window: WindowConfig { interval_ms: 1000 },
-        compaction: CompactionConfig {
-            interval_windows: 60,
-        },
-        retention: RetentionConfig {
-            duration: "1d".into(),
-            parquet_path: "/tmp/test_parquet".into(),
-        },
-        persistence: PersistenceConfig {
-            enabled: true,
-            path: ":memory:".into(),
-            flush_interval: 10,
-        },
-        publish: None,
-        ui: None,
-        auth: None,
-        log_level: "info".into(),
-    }
+fn minimal_cfg_for_persistence() -> hydrocube::config::CubeConfig {
+    serde_yaml::from_str(r#"
+name: test_cube
+tables:
+  - name: slices
+    mode: append
+    schema:
+      columns:
+        - { name: trade_id, type: VARCHAR }
+        - { name: quantity,  type: DOUBLE }
+sources: []
+window: { interval_ms: 1000 }
+persistence: { enabled: true, path: ":memory:", flush_interval: 10 }
+aggregation:
+  key_columns: [trade_id]
+  publish:
+    sql: "SELECT trade_id, SUM(quantity) AS qty FROM {slices} GROUP BY trade_id"
+"#).unwrap()
 }
 
 fn open_db() -> DbManager {
@@ -71,7 +39,7 @@ fn open_db() -> DbManager {
 #[tokio::test]
 async fn test_parquet_export() {
     let db = open_db();
-    let config = test_config();
+    let config = minimal_cfg_for_persistence();
 
     // Initialise tables (creates slices + metadata).
     persistence::init(&db, &config)
@@ -144,4 +112,70 @@ async fn test_retention_prune_old_files() {
         std::path::Path::new(&new_dir).exists(),
         "new directory should not have been pruned"
     );
+}
+
+#[tokio::test]
+async fn test_compaction_advances_cutoff_without_deleting_rows() {
+    use hydrocube::aggregation::window::set_compaction_cutoff;
+    use hydrocube::db_manager::DbManager;
+    use hydrocube::hooks::runner::HookRunner;
+
+    set_compaction_cutoff(0);
+
+    let db = DbManager::open_in_memory().unwrap();
+    db.execute(
+        "CREATE TABLE trades (book VARCHAR, notional DOUBLE, _window_id UBIGINT)",
+        vec![],
+    ).await.unwrap();
+
+    // Insert rows in windows 1 and 2
+    for wid in [1u64, 2u64] {
+        db.execute(
+            &format!("INSERT INTO trades VALUES ('EMEA', 1000.0, {wid})"),
+            vec![],
+        ).await.unwrap();
+    }
+
+    let cfg: hydrocube::config::CubeConfig = serde_yaml::from_str(r#"
+name: t
+tables:
+  - name: trades
+    mode: append
+    schema:
+      columns:
+        - { name: book,     type: VARCHAR }
+        - { name: notional, type: DOUBLE }
+sources: []
+window: { interval_ms: 1000 }
+persistence: { enabled: false, path: ":memory:", flush_interval: 10 }
+aggregation:
+  key_columns: [book]
+  compaction:
+    interval: 60s
+    sql: |
+      CREATE TABLE IF NOT EXISTS intraday_compacted AS
+        SELECT book, SUM(notional) AS total
+        FROM (SELECT * FROM trades WHERE _window_id > 0 AND _window_id <= 2)
+        GROUP BY book
+  publish:
+    sql: "SELECT book, SUM(notional) AS total FROM {trades} GROUP BY book"
+"#).unwrap();
+
+    let runner = HookRunner::new(cfg, db.clone());
+
+    // Run compaction with new_cutoff = 2
+    runner.run_compaction(2).await.unwrap();
+
+    // Advance the cutoff
+    hydrocube::aggregation::window::set_compaction_cutoff(2);
+
+    // Raw rows must still be there (no-delete model)
+    let rows = db.query_json("SELECT COUNT(*) AS cnt FROM trades", vec![]).await.unwrap();
+    let cnt = rows[0]["cnt"].as_u64().unwrap_or(0);
+    assert_eq!(cnt, 2, "raw rows must not be deleted by compaction");
+
+    // Compacted table should have been created by the hook SQL
+    let agg = db.query_json("SELECT total FROM intraday_compacted WHERE book = 'EMEA'", vec![]).await.unwrap();
+    assert!(!agg.is_empty(), "compaction SQL should have created intraday_compacted");
+    assert_eq!(agg[0]["total"].as_f64().unwrap(), 2000.0);
 }
