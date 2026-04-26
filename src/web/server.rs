@@ -20,7 +20,7 @@ use crate::db_manager::DbManager;
 use crate::error::{HcError, HcResult};
 use crate::publish::DeltaEvent;
 
-use super::api::{query_handler, schema_handler, snapshot_handler, status_handler, AppState};
+use super::api::{drillthrough_handler, query_handler, reaggregate_handler, schema_handler, snapshot_handler, status_handler, AppState};
 use super::assets::static_handler;
 
 // ---------------------------------------------------------------------------
@@ -111,6 +111,8 @@ pub async fn start_server(
         .route("/api/schema", get(schema_handler))
         .route("/api/snapshot", get(snapshot_handler))
         .route("/api/query", post(query_handler))
+        .route("/api/drillthrough/{table}", get(drillthrough_handler))
+        .route("/api/reaggregate", post(reaggregate_handler))
         // SSE stream
         .route("/api/stream", get(sse_handler))
         // Static assets
