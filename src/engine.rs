@@ -41,7 +41,7 @@ pub async fn run_hot_path(
     // -------------------------------------------------------------------------
     let agg_gen = AggSqlGenerator::from_user_sql(&config.aggregation.publish.sql)?;
     let dimension_names: Vec<String> = agg_gen.dimensions().iter().map(|d| d.to_string()).collect();
-    let mut detector = DeltaDetector::new(dimension_names);
+    let mut detector = DeltaDetector::new(dimension_names, config.delta.epsilon);
 
     // Use the full aggregation SQL wrapped with a synthetic _key column.
     let agg_sql = agg_gen.full_aggregation_sql_with_key();

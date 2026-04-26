@@ -126,7 +126,7 @@ async fn test_end_to_end_pipeline() {
         "instrument_type".to_string(),
         "currency".to_string(),
     ];
-    let mut detector = DeltaDetector::new(dimension_names);
+    let mut detector = DeltaDetector::new(dimension_names, 0.0);
 
     // Merge all batches into one for the detector.
     let schema = batches[0].schema();

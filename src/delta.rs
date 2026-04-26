@@ -1,16 +1,17 @@
 // src/delta.rs
 //
-// Hash-based delta detection for aggregate RecordBatches.
+// Delta detection for aggregate RecordBatches.
 //
 // Each window produces a RecordBatch of aggregate rows.  DeltaDetector compares
 // the current batch against the previous window's state (stored as a HashMap of
-// dimension_key → measure_hash) and returns two filtered batches:
+// dimension_key → measure values) and returns two filtered batches:
 //   - upserts: rows that are new or have changed measure values
 //   - deletes: rows that were present in the previous window but are gone now
+//
+// When epsilon > 0.0, float measure changes smaller than epsilon are suppressed
+// (treated as unchanged) to avoid spurious updates from floating-point noise.
 
-use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use duckdb::arrow::array::{
@@ -28,17 +29,29 @@ use duckdb::arrow::record_batch::RecordBatch;
 pub struct DeltaDetector {
     /// Names of dimension columns (used to build the row key).
     dimension_names: Vec<String>,
-    /// Previous window state: dimension_key → hash of measure values.
-    previous: HashMap<String, u64>,
+    /// Previous window state: dimension_key → stringified measure values.
+    previous: HashMap<String, Vec<String>>,
+    /// Suppress float changes smaller than this threshold (0.0 = exact comparison).
+    epsilon: f64,
 }
 
 impl DeltaDetector {
     /// Create a new detector with empty previous state.
-    pub fn new(dimension_names: Vec<String>) -> Self {
+    ///
+    /// `epsilon` controls float suppression: changes where `|prev - curr| <= epsilon`
+    /// are treated as unchanged.  Pass `0.0` to keep the exact-comparison behaviour.
+    pub fn new(dimension_names: Vec<String>, epsilon: f64) -> Self {
         Self {
             dimension_names,
             previous: HashMap::new(),
+            epsilon,
         }
+    }
+
+    /// Reset all previous state. After this call the next `detect` treats all
+    /// rows as new (no prior window to compare against).
+    pub fn clear(&mut self) {
+        self.previous.clear();
     }
 
     /// Compare `current` against the previous window.
@@ -65,18 +78,21 @@ impl DeltaDetector {
             .collect();
 
         // Build current-window state.
-        let mut current_state: HashMap<String, u64> = HashMap::new();
+        let mut current_state: HashMap<String, Vec<String>> = HashMap::new();
         let mut upsert_indices: Vec<u32> = Vec::new();
 
         for row in 0..current.num_rows() {
             let key = build_dimension_key(current, &dim_indices, row);
-            let measure_hash = hash_measures(current, &measure_indices, row);
+            let measure_vals: Vec<String> = measure_indices
+                .iter()
+                .map(|&col| array_value_to_string(current.column(col), row))
+                .collect();
 
-            current_state.insert(key.clone(), measure_hash);
+            current_state.insert(key.clone(), measure_vals.clone());
 
             let changed = match self.previous.get(&key) {
-                None => true,                                  // new group
-                Some(&prev_hash) => prev_hash != measure_hash, // changed
+                None => true, // new group
+                Some(prev_vals) => self.values_changed(prev_vals, &measure_vals),
             };
 
             if changed {
@@ -132,6 +148,32 @@ impl DeltaDetector {
     pub fn previous_count(&self) -> usize {
         self.previous.len()
     }
+
+    /// Compare two measure-value vectors, applying epsilon suppression for floats.
+    ///
+    /// Returns `true` if the values are considered changed.
+    fn values_changed(&self, prev: &[String], curr: &[String]) -> bool {
+        if prev.len() != curr.len() {
+            return true;
+        }
+        for (p, c) in prev.iter().zip(curr.iter()) {
+            if p == c {
+                continue; // exact string match — no change
+            }
+            // Try epsilon comparison for floats when epsilon > 0.
+            if self.epsilon > 0.0 {
+                if let (Ok(pf), Ok(cf)) = (p.parse::<f64>(), c.parse::<f64>()) {
+                    if (pf - cf).abs() <= self.epsilon {
+                        continue; // within epsilon — suppress
+                    }
+                    return true;
+                }
+            }
+            // Non-float or epsilon == 0: any string difference counts.
+            return true;
+        }
+        false
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -148,16 +190,11 @@ fn build_dimension_key(batch: &RecordBatch, dim_indices: &[usize], row: usize) -
         .join("|")
 }
 
-/// Hash the measure column values of a single row using DefaultHasher.
-fn hash_measures(batch: &RecordBatch, measure_indices: &[usize], row: usize) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    for &col in measure_indices {
-        array_value_to_string(batch.column(col), row).hash(&mut hasher);
-    }
-    hasher.finish()
-}
-
-/// Convert a single value from an Arrow array to a String for hashing/key-building.
+/// Convert a single value from an Arrow array to a String for comparison/key-building.
+/// Handles the common DuckDB output types.  Falls back to `"<null>"` for nulls.
+///
+/// Float columns are formatted with full precision so that epsilon comparison
+/// can later parse them back to f64 exactly.
 /// Handles the common DuckDB output types.  Falls back to `"<null>"` for nulls.
 fn array_value_to_string(array: &ArrayRef, row: usize) -> String {
     if array.is_null(row) {
@@ -171,8 +208,9 @@ fn array_value_to_string(array: &ArrayRef, row: usize) -> String {
         }
         DataType::Float64 => {
             let arr = array.as_any().downcast_ref::<Float64Array>().unwrap();
-            // Use bit representation to get a stable hash for the same float.
-            format!("{}", arr.value(row).to_bits())
+            // Full-precision decimal representation so epsilon comparison can
+            // parse the stored string back to f64 without loss.
+            format!("{}", arr.value(row))
         }
         DataType::Int64 => {
             let arr = array.as_any().downcast_ref::<Int64Array>().unwrap();
@@ -198,7 +236,7 @@ fn array_value_to_string(array: &ArrayRef, row: usize) -> String {
                 .as_any()
                 .downcast_ref::<duckdb::arrow::array::Float32Array>()
                 .unwrap();
-            format!("{}", arr.value(row).to_bits())
+            format!("{}", arr.value(row))
         }
         // Timestamps: read the raw integer value so changes are detectable.
         DataType::Timestamp(TimeUnit::Microsecond, _) => {

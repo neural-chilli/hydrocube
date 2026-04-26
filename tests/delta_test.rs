@@ -40,7 +40,7 @@ fn make_batch(books: &[&str], totals: &[f64]) -> RecordBatch {
 
 #[test]
 fn test_first_window_all_rows_are_deltas() {
-    let mut detector = DeltaDetector::new(vec!["book".into()]);
+    let mut detector = DeltaDetector::new(vec!["book".into()], 0.0);
 
     let batch = make_batch(&["FX", "Rates", "Credit"], &[100.0, 200.0, 50.0]);
     let (upserts, deletes) = detector.detect(&batch);
@@ -62,7 +62,7 @@ fn test_first_window_all_rows_are_deltas() {
 
 #[test]
 fn test_unchanged_rows_not_in_delta() {
-    let mut detector = DeltaDetector::new(vec!["book".into()]);
+    let mut detector = DeltaDetector::new(vec!["book".into()], 0.0);
 
     let batch = make_batch(&["FX", "Rates"], &[100.0, 200.0]);
 
@@ -89,7 +89,7 @@ fn test_unchanged_rows_not_in_delta() {
 
 #[test]
 fn test_changed_row_detected() {
-    let mut detector = DeltaDetector::new(vec!["book".into()]);
+    let mut detector = DeltaDetector::new(vec!["book".into()], 0.0);
 
     // Window 1.
     let batch1 = make_batch(&["FX", "Rates"], &[100.0, 200.0]);
@@ -123,7 +123,7 @@ fn test_changed_row_detected() {
 
 #[test]
 fn test_deleted_group_detected() {
-    let mut detector = DeltaDetector::new(vec!["book".into()]);
+    let mut detector = DeltaDetector::new(vec!["book".into()], 0.0);
 
     // Window 1: FX and Rates present.
     let batch1 = make_batch(&["FX", "Rates"], &[100.0, 200.0]);
@@ -152,7 +152,7 @@ fn test_deleted_group_detected() {
 
 #[test]
 fn test_new_group_detected() {
-    let mut detector = DeltaDetector::new(vec!["book".into()]);
+    let mut detector = DeltaDetector::new(vec!["book".into()], 0.0);
 
     // Window 1: only FX.
     let batch1 = make_batch(&["FX"], &[100.0]);
@@ -187,7 +187,7 @@ fn test_new_group_detected() {
 
 #[test]
 fn test_empty_batch_clears_state() {
-    let mut detector = DeltaDetector::new(vec!["book".into()]);
+    let mut detector = DeltaDetector::new(vec!["book".into()], 0.0);
 
     // Window 1: some data.
     let batch1 = make_batch(&["FX", "Rates"], &[100.0, 200.0]);
@@ -204,4 +204,122 @@ fn test_empty_batch_clears_state() {
         "empty window: expected 2 deletes (FX + Rates), got {}",
         deletes.num_rows()
     );
+}
+
+// ---------------------------------------------------------------------------
+// Task 17: Epsilon suppression tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_epsilon_suppresses_small_float_change() {
+    use duckdb::arrow::array::{Float64Array, StringArray};
+    use duckdb::arrow::datatypes::{DataType, Field, Schema};
+    use duckdb::arrow::record_batch::RecordBatch;
+    use std::sync::Arc;
+
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("book", DataType::Utf8, false),
+        Field::new("total", DataType::Float64, false),
+    ]));
+
+    fn make_batch(schema: Arc<Schema>, book: &str, total: f64) -> RecordBatch {
+        RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(StringArray::from(vec![book])) as _,
+                Arc::new(Float64Array::from(vec![total])) as _,
+            ],
+        )
+        .unwrap()
+    }
+
+    let epsilon = 0.001;
+    let mut detector = DeltaDetector::new(vec!["book".to_owned()], epsilon);
+
+    // First window — everything is new.
+    let batch1 = make_batch(schema.clone(), "EMEA", 1000.0);
+    let (ups1, _) = detector.detect(&batch1);
+    assert_eq!(ups1.num_rows(), 1);
+
+    // Second window — tiny change within epsilon (0.0005 < 0.001).
+    let batch2 = make_batch(schema.clone(), "EMEA", 1000.0005);
+    let (ups2, _) = detector.detect(&batch2);
+    assert_eq!(ups2.num_rows(), 0, "change within epsilon should be suppressed");
+
+    // Third window — change beyond epsilon (0.005 > 0.001).
+    let batch3 = make_batch(schema.clone(), "EMEA", 1000.005);
+    let (ups3, _) = detector.detect(&batch3);
+    assert_eq!(ups3.num_rows(), 1, "change beyond epsilon should be detected");
+}
+
+#[test]
+fn test_zero_epsilon_detects_all_float_changes() {
+    use duckdb::arrow::array::{Float64Array, StringArray};
+    use duckdb::arrow::datatypes::{DataType, Field, Schema};
+    use duckdb::arrow::record_batch::RecordBatch;
+    use std::sync::Arc;
+
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("key", DataType::Utf8, false),
+        Field::new("val", DataType::Float64, false),
+    ]));
+
+    let mut detector = DeltaDetector::new(vec!["key".to_owned()], 0.0);
+
+    let b1 = RecordBatch::try_new(
+        schema.clone(),
+        vec![
+            Arc::new(StringArray::from(vec!["A"])) as _,
+            Arc::new(Float64Array::from(vec![1.0])) as _,
+        ],
+    )
+    .unwrap();
+    detector.detect(&b1);
+
+    // Any float change at epsilon=0.0 should trigger.
+    let b2 = RecordBatch::try_new(
+        schema.clone(),
+        vec![
+            Arc::new(StringArray::from(vec!["A"])) as _,
+            Arc::new(Float64Array::from(vec![1.0000001])) as _,
+        ],
+    )
+    .unwrap();
+    let (ups, _) = detector.detect(&b2);
+    assert_eq!(ups.num_rows(), 1);
+}
+
+// ---------------------------------------------------------------------------
+// Task 18: clear() tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_clear_resets_previous_state() {
+    use duckdb::arrow::array::{Float64Array, StringArray};
+    use duckdb::arrow::datatypes::{DataType, Field, Schema};
+    use duckdb::arrow::record_batch::RecordBatch;
+    use std::sync::Arc;
+
+    let schema = Arc::new(Schema::new(vec![
+        Field::new("key", DataType::Utf8, false),
+        Field::new("val", DataType::Float64, false),
+    ]));
+
+    let mut detector = DeltaDetector::new(vec!["key".to_owned()], 0.0);
+
+    let b1 = RecordBatch::try_new(
+        schema.clone(),
+        vec![
+            Arc::new(StringArray::from(vec!["A"])) as _,
+            Arc::new(Float64Array::from(vec![1.0])) as _,
+        ],
+    )
+    .unwrap();
+    detector.detect(&b1); // A is now "known"
+
+    detector.clear(); // wipe state
+
+    // Same batch — should be detected as NEW (previous cleared).
+    let (ups, _) = detector.detect(&b1);
+    assert_eq!(ups.num_rows(), 1, "after clear(), all rows are treated as new");
 }
