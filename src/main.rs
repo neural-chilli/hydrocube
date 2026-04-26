@@ -11,7 +11,7 @@ use tracing_subscriber::{fmt, EnvFilter};
 use hydrocube::aggregation::window;
 use hydrocube::cli::Cli;
 use hydrocube::compaction::CompactionThread;
-use hydrocube::config::{self, CubeConfig};
+use hydrocube::config::CubeConfig;
 use hydrocube::db_manager::DbManager;
 use hydrocube::error::exit_code;
 use hydrocube::persistence;
@@ -37,7 +37,7 @@ async fn main() {
         }
     };
 
-    let config: CubeConfig = match config::load_config(&yaml) {
+    let config: CubeConfig = match serde_yaml::from_str(&yaml) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("ERROR: invalid config YAML: {}", e);
