@@ -6,7 +6,7 @@
 use serde_json::Value as JsonValue;
 use tracing::{info, warn};
 
-use crate::config::CubeConfig;
+use crate::config::{CubeConfig, TableConfig, TableMode};
 use crate::db_manager::DbManager;
 use crate::error::{HcError, HcResult};
 
@@ -136,6 +136,55 @@ pub async fn save_compaction_cutoff(db: &DbManager, cutoff: u64) -> HcResult<()>
     )
     .await?;
     Ok(())
+}
+
+/// Create or verify DuckDB tables for each declared TableConfig.
+/// Safe to call on an existing database — uses CREATE TABLE IF NOT EXISTS.
+pub async fn init_tables(db: &DbManager, tables: &[TableConfig]) -> HcResult<()> {
+    for table in tables {
+        let ddl = build_create_table_ddl(table);
+        db.execute(&ddl, vec![]).await?;
+    }
+    Ok(())
+}
+
+fn build_create_table_ddl(table: &TableConfig) -> String {
+    let mut col_defs: Vec<String> = table
+        .schema
+        .columns
+        .iter()
+        .map(|c| format!("  {} {}", c.name, c.col_type))
+        .collect();
+
+    match table.mode {
+        TableMode::Append => {
+            col_defs.push("  _window_id UBIGINT NOT NULL".to_owned());
+            format!(
+                "CREATE TABLE IF NOT EXISTS {} (\n{}\n)",
+                table.name,
+                col_defs.join(",\n")
+            )
+        }
+        TableMode::Replace => {
+            let key_cols = table
+                .key_columns
+                .as_ref()
+                .expect("replace table must have key_columns");
+            col_defs.push(format!("  PRIMARY KEY ({})", key_cols.join(", ")));
+            format!(
+                "CREATE TABLE IF NOT EXISTS {} (\n{}\n)",
+                table.name,
+                col_defs.join(",\n")
+            )
+        }
+        TableMode::Reference => {
+            format!(
+                "CREATE TABLE IF NOT EXISTS {} (\n{}\n)",
+                table.name,
+                col_defs.join(",\n")
+            )
+        }
+    }
 }
 
 /// Drop all managed tables then re-initialise from scratch.

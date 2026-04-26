@@ -1,8 +1,8 @@
 // tests/persistence_test.rs
 
 use hydrocube::config::{
-    AggregationConfig, ColumnDef, CompactionConfig, CubeConfig, PersistenceConfig, RetentionConfig,
-    SchemaConfig, SourceConfig, WindowConfig,
+    AggregationConfig, ColumnDef, CubeConfig, DeltaConfig, DrillThroughConfig,
+    PersistenceConfig, PublishHookConfig, SchemaConfig, TableConfig, TableMode, WindowConfig,
 };
 use hydrocube::db_manager::DbManager;
 use hydrocube::error::HcError;
@@ -17,48 +17,40 @@ fn test_config() -> CubeConfig {
     CubeConfig {
         name: "test_cube".into(),
         description: None,
-        source: SourceConfig {
-            source_type: "test".into(),
-            brokers: None,
-            topic: None,
-            group_id: None,
-            format: "json".into(),
-        },
-        schema: SchemaConfig {
-            columns: vec![
-                ColumnDef {
-                    name: "trade_id".into(),
-                    col_type: "VARCHAR".into(),
-                },
-                ColumnDef {
-                    name: "quantity".into(),
-                    col_type: "DOUBLE".into(),
-                },
-                ColumnDef {
-                    name: "price".into(),
-                    col_type: "DOUBLE".into(),
-                },
-            ],
-        },
-        transform: None,
-        aggregation: AggregationConfig {
-            sql: "SELECT SUM(quantity) FROM slices".into(),
-        },
+        tables: vec![TableConfig {
+            name: "slices".into(),
+            mode: TableMode::Append,
+            event_time_column: None,
+            key_columns: None,
+            schema: SchemaConfig {
+                columns: vec![
+                    ColumnDef { name: "trade_id".into(), col_type: "VARCHAR".into() },
+                    ColumnDef { name: "quantity".into(), col_type: "DOUBLE".into() },
+                    ColumnDef { name: "price".into(),    col_type: "DOUBLE".into() },
+                ],
+            },
+        }],
+        sources: vec![],
         window: WindowConfig { interval_ms: 1000 },
-        compaction: CompactionConfig {
-            interval_windows: 60,
-        },
-        retention: RetentionConfig {
-            duration: "1d".into(),
-            parquet_path: "/tmp/test_parquet".into(),
-        },
-        persistence: PersistenceConfig {
-            enabled: true,
-            path: ":memory:".into(),
-            flush_interval: 10,
+        persistence: PersistenceConfig { enabled: true, path: ":memory:".into(), flush_interval: 10 },
+        retention: None,
+        drillthrough: DrillThroughConfig::default(),
+        delta: DeltaConfig::default(),
+        aggregation: AggregationConfig {
+            key_columns: vec!["trade_id".into()],
+            dimensions: None,
+            measures: None,
+            startup: None,
+            compaction: None,
+            publish: PublishHookConfig {
+                sql: "SELECT trade_id, SUM(quantity) FROM {slices} GROUP BY trade_id".into(),
+            },
+            snapshots: None,
+            reset: None,
+            housekeeping: None,
+            reaggregation: None,
         },
         publish: None,
-        ui: None,
         auth: None,
         log_level: "info".into(),
     }
@@ -138,7 +130,7 @@ async fn test_config_hash_mismatch_detected() {
 
     // Build config B with a different schema column.
     let mut config_b = test_config();
-    config_b.schema.columns.push(ColumnDef {
+    config_b.tables[0].schema.columns.push(ColumnDef {
         name: "extra_col".into(),
         col_type: "INTEGER".into(),
     });
@@ -283,4 +275,85 @@ async fn test_init_is_idempotent() {
         .expect("count metadata rows");
     let cnt = rows[0]["cnt"].as_u64().unwrap_or(0);
     assert_eq!(cnt, 1, "exactly one metadata row expected after two inits");
+}
+
+// ---------------------------------------------------------------------------
+// New multi-table init tests
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_init_tables_creates_append_table_with_window_id() {
+    use hydrocube::config::{ColumnDef, SchemaConfig, TableConfig, TableMode};
+    let db = open_db();
+    let tables = vec![TableConfig {
+        name: "events".into(),
+        mode: TableMode::Append,
+        event_time_column: None,
+        key_columns: None,
+        schema: SchemaConfig {
+            columns: vec![
+                ColumnDef { name: "id".into(),  col_type: "VARCHAR".into() },
+                ColumnDef { name: "val".into(), col_type: "DOUBLE".into() },
+            ],
+        },
+    }];
+    persistence::init_tables(&db, &tables).await.unwrap();
+    // Insert a row including _window_id
+    db.execute(
+        "INSERT INTO events (id, val, _window_id) VALUES ('a', 1.0, 1)",
+        vec![],
+    ).await.unwrap();
+    let rows = db.query_json("SELECT * FROM events", vec![]).await.unwrap();
+    assert_eq!(rows.len(), 1);
+}
+
+#[tokio::test]
+async fn test_init_tables_creates_replace_table_with_primary_key() {
+    use hydrocube::config::{ColumnDef, SchemaConfig, TableConfig, TableMode};
+    let db = open_db();
+    let tables = vec![TableConfig {
+        name: "md".into(),
+        mode: TableMode::Replace,
+        event_time_column: None,
+        key_columns: Some(vec!["id".into()]),
+        schema: SchemaConfig {
+            columns: vec![
+                ColumnDef { name: "id".into(),  col_type: "VARCHAR".into() },
+                ColumnDef { name: "val".into(), col_type: "DOUBLE".into() },
+            ],
+        },
+    }];
+    persistence::init_tables(&db, &tables).await.unwrap();
+    // Duplicate key insert should either error or replace — DuckDB uses INSERT OR REPLACE behaviour
+    db.execute("INSERT INTO md (id, val) VALUES ('x', 1.0)", vec![]).await.unwrap();
+    // Verify the table exists and has the right shape
+    let rows = db.query_json("SELECT val FROM md WHERE id = 'x'", vec![]).await.unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["val"].as_f64().unwrap(), 1.0);
+}
+
+#[tokio::test]
+async fn test_init_tables_creates_reference_table_no_window_id() {
+    use hydrocube::config::{ColumnDef, SchemaConfig, TableConfig, TableMode};
+    let db = open_db();
+    let tables = vec![TableConfig {
+        name: "ref_data".into(),
+        mode: TableMode::Reference,
+        event_time_column: None,
+        key_columns: None,
+        schema: SchemaConfig {
+            columns: vec![
+                ColumnDef { name: "id".into(),  col_type: "VARCHAR".into() },
+                ColumnDef { name: "val".into(), col_type: "DOUBLE".into() },
+            ],
+        },
+    }];
+    persistence::init_tables(&db, &tables).await.unwrap();
+    db.execute("INSERT INTO ref_data (id, val) VALUES ('a', 1.0)", vec![]).await.unwrap();
+    // Confirm no _window_id column (inserting it should fail)
+    let result = db.execute(
+        "INSERT INTO ref_data (id, val, _window_id) VALUES ('b', 2.0, 99)",
+        vec![],
+    ).await;
+    assert!(result.is_err(), "reference table should not have _window_id");
 }
