@@ -1,7 +1,47 @@
-use hydrocube::config::{
-    AggregationConfig, CubeConfig, DataFormat, LoadTiming, PublishHookConfig,
-    SourceConfig, SourceType, TableConfig, TableMode,
-};
+use hydrocube::config::{CubeConfig, LoadTiming, SourceType, TableMode};
+
+#[test]
+fn test_old_format_migrates_to_new() {
+    let old_yaml = r#"
+name: legacy_cube
+source:
+  type: kafka
+  brokers: ["localhost:9092"]
+  topic: trades.executed
+  group_id: hydrocube-trades
+  format: json
+schema:
+  columns:
+    - { name: book, type: VARCHAR }
+    - { name: notional, type: DOUBLE }
+window:
+  interval_ms: 1000
+persistence:
+  enabled: false
+  path: ":memory:"
+  flush_interval: 10
+aggregation:
+  sql: "SELECT book, SUM(notional) AS total FROM slices GROUP BY book"
+compaction:
+  interval_windows: 60
+retention:
+  duration: 7d
+  parquet_path: /tmp/archive
+"#;
+    let cfg = hydrocube::config::load_config(old_yaml).unwrap();
+    assert_eq!(cfg.name, "legacy_cube");
+    assert_eq!(cfg.tables.len(), 1);
+    assert_eq!(cfg.tables[0].name, "slices");
+    assert!(matches!(cfg.tables[0].mode, hydrocube::config::TableMode::Append));
+    assert_eq!(cfg.sources.len(), 1);
+    assert_eq!(cfg.sources[0].table, "slices");
+    assert!(matches!(cfg.sources[0].source_type, hydrocube::config::SourceType::Kafka));
+    assert_eq!(
+        cfg.aggregation.publish.sql,
+        "SELECT book, SUM(notional) AS total FROM slices GROUP BY book"
+    );
+    assert!(!cfg.aggregation.key_columns.is_empty()); // inferred from GROUP BY
+}
 
 fn minimal_new_config_yaml() -> &'static str {
     r#"
