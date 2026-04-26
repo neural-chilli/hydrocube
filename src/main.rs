@@ -182,7 +182,7 @@ async fn main() {
     // -------------------------------------------------------------------------
     // 13b. Raw message channel for ingest → engine
     // -------------------------------------------------------------------------
-    let (raw_tx, raw_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(10_000);
+    let (raw_tx, raw_rx) = tokio::sync::mpsc::channel::<hydrocube::ingest::RawMessage>(10_000);
 
     // Spawn Kafka ingest (only when kafka feature enabled and source is kafka)
     // Kafka ingest is handled per-source in the new config model.

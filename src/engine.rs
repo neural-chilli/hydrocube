@@ -1,61 +1,72 @@
 // src/engine.rs
 //
-// Hot path engine loop: consumes raw messages, buffers them in-window,
-// inserts to DuckDB slices, aggregates, delta-detects, and broadcasts.
+// Hot path engine loop: consumes raw messages, routes by table, buffers them
+// in per-table TableBuffers, inserts to DuckDB, aggregates, delta-detects,
+// and broadcasts.
 
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
-use tokio::sync::{broadcast, mpsc, watch};
+use tokio::sync::{broadcast, watch};
 
 use crate::aggregation::sql_gen::AggSqlGenerator;
 use crate::aggregation::window;
-use crate::config::{ColumnDef, CubeConfig};
+use crate::config::{ColumnDef, CubeConfig, TableMode};
 use crate::db_manager::{arrow::compute::concat_batches, DbManager};
 use crate::delta::DeltaDetector;
 use crate::error::HcResult;
-use crate::ingest::parser::JsonParser;
+use crate::ingest::IngestReceiver;
 use crate::persistence;
 use crate::publish::{batch_to_base64_arrow, DeltaEvent};
+use crate::tables::TableBuffer;
 use crate::transform::sql::value_to_sql;
 use crate::transform::TransformPipeline;
 
 /// Run the hot-path engine loop until `shutdown` fires or the ingest channel
 /// closes.
 ///
-/// - `raw_rx`      — byte messages from the ingest source (Kafka, test harness, …)
+/// - `raw_rx`      — typed `RawMessage` from the ingest source (Kafka, test harness, …)
 /// - `broadcast_tx`— sends `DeltaEvent` to SSE subscribers after each window flush
 /// - `shutdown`    — a `watch::Receiver<bool>`; breaks the loop when `true`
 pub async fn run_hot_path(
     db: DbManager,
     config: CubeConfig,
-    mut raw_rx: mpsc::Receiver<Vec<u8>>,
+    mut raw_rx: IngestReceiver,
     broadcast_tx: broadcast::Sender<DeltaEvent>,
     mut shutdown: watch::Receiver<bool>,
 ) -> HcResult<()> {
     // -------------------------------------------------------------------------
     // Setup
     // -------------------------------------------------------------------------
-    // Use the first table's columns as the schema for the hot path.
-    // In future tasks this will be per-table; for now use an empty slice if no tables.
-    let hot_columns: Vec<crate::config::ColumnDef> = config.tables.first()
-        .map(|t| t.schema.columns.clone())
-        .unwrap_or_default();
-    let parser = JsonParser::new(&hot_columns);
-
     let agg_gen = AggSqlGenerator::from_user_sql(&config.aggregation.publish.sql)?;
     let dimension_names: Vec<String> = agg_gen.dimensions().iter().map(|d| d.to_string()).collect();
     let mut detector = DeltaDetector::new(dimension_names);
 
     // Use the full aggregation SQL wrapped with a synthetic _key column.
-    // _key is a pipe-delimited concatenation of all GROUP BY dimensions,
-    // used by the Perspective viewer as a stable row index for true upserts.
     let agg_sql = agg_gen.full_aggregation_sql_with_key();
 
     // In the new config, transforms are per-source; no top-level transform.
-    let pipeline: Option<TransformPipeline> = None;
+    let _pipeline: Option<TransformPipeline> = None;
 
-    let mut buffer: Vec<Vec<Value>> = Vec::new();
+    // One buffer per table (reference tables have no buffer).
+    let mut buffers: HashMap<String, TableBuffer> = config
+        .tables
+        .iter()
+        .filter_map(|t| {
+            let buf = match t.mode {
+                TableMode::Append => TableBuffer::new_append(),
+                TableMode::Replace => {
+                    let key_cols = t.key_columns.clone().unwrap_or_default();
+                    let schema_cols = t.schema.columns.iter().map(|c| c.name.clone()).collect();
+                    TableBuffer::new_replace(key_cols, schema_cols)
+                }
+                TableMode::Reference => return None, // no ingest buffer
+            };
+            Some((t.name.clone(), buf))
+        })
+        .collect();
+
     let mut tick = tokio::time::interval(Duration::from_millis(config.window.interval_ms));
     let mut flush_counter = 0u64;
 
@@ -72,30 +83,47 @@ pub async fn run_hot_path(
             }
 
             _ = tick.tick() => {
-                if buffer.is_empty() {
-                    continue;
-                }
-
                 let start = Instant::now();
                 let window_id = window::next_window_id();
-                let row_count = buffer.len();
+                let mut any_rows = false;
 
-                // Transform if configured
-                let rows = if let Some(ref pipeline) = pipeline {
-                    pipeline
-                        .execute(&db, &hot_columns, std::mem::take(&mut buffer))
-                        .await?
-                } else {
-                    std::mem::take(&mut buffer)
-                };
+                // Drain append buffers and insert rows.
+                for (table_name, buf) in buffers.iter_mut() {
+                    if let TableBuffer::Append(append_buf) = buf {
+                        if append_buf.is_empty() { continue; }
+                        let rows = append_buf.drain();
+                        any_rows = true;
+                        if let Some(table_cfg) = config.table(table_name) {
+                            let insert_sql = build_insert_sql_for_table(
+                                table_name,
+                                &table_cfg.schema.columns,
+                                &rows,
+                                window_id,
+                            );
+                            db.execute(insert_sql, vec![]).await?;
+                        }
+                    }
 
-                if rows.is_empty() {
-                    continue;
+                    // Replace buffers: truncate + re-insert surviving rows.
+                    if let TableBuffer::Replace(replace_buf) = buf {
+                        if replace_buf.is_empty() { continue; }
+                        let rows = replace_buf.flush();
+                        any_rows = true;
+                        if let Some(table_cfg) = config.table(table_name) {
+                            db.execute(format!("DELETE FROM {}", table_name), vec![]).await?;
+                            for row in &rows {
+                                let insert_sql = build_single_row_insert(
+                                    table_name,
+                                    &table_cfg.schema.columns,
+                                    row,
+                                );
+                                db.execute(insert_sql, vec![]).await?;
+                            }
+                        }
+                    }
                 }
 
-                // Insert rows into slices table
-                let insert_sql = build_insert_sql(&hot_columns, &rows, window_id);
-                db.execute(insert_sql, vec![]).await?;
+                if !any_rows { continue; }
 
                 // Aggregate all retained slices.
                 // DuckDB may return the result across multiple Arrow batches;
@@ -123,9 +151,8 @@ pub async fn run_hot_path(
 
                     tracing::debug!(
                         target: "aggregate",
-                        "Window {}: {} rows -> {} upserts in {:?}",
+                        "Window {}: {} upserts in {:?}",
                         window_id,
-                        row_count,
                         upserts.num_rows(),
                         start.elapsed()
                     );
@@ -142,10 +169,28 @@ pub async fn run_hot_path(
 
             msg = raw_rx.recv() => {
                 match msg {
-                    Some(bytes) => {
-                        match parser.parse(&bytes) {
-                            Ok(row) => buffer.push(row),
-                            Err(e) => tracing::warn!(target: "ingest", "Parse error: {}", e),
+                    Some(raw_msg) => {
+                        if let Some(buf) = buffers.get_mut(&raw_msg.table) {
+                            if let Some(table_cfg) = config.table(&raw_msg.table) {
+                                match parse_row_for_table(&raw_msg.bytes, table_cfg) {
+                                    Ok(row) => match buf {
+                                        TableBuffer::Append(_) => buf.push_append(row),
+                                        TableBuffer::Replace(_) => buf.upsert_replace(row),
+                                    },
+                                    Err(e) => tracing::warn!(
+                                        target: "ingest",
+                                        "Parse error for {}: {}",
+                                        raw_msg.table,
+                                        e
+                                    ),
+                                }
+                            }
+                        } else {
+                            tracing::warn!(
+                                target: "ingest",
+                                "Unknown table: {}",
+                                raw_msg.table
+                            );
                         }
                     }
                     None => {
@@ -160,17 +205,35 @@ pub async fn run_hot_path(
     Ok(())
 }
 
-/// Build a bulk `INSERT INTO slices` statement for all rows in a window.
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+fn parse_row_for_table(bytes: &[u8], table_cfg: &crate::config::TableConfig) -> HcResult<Vec<Value>> {
+    let v: Value = serde_json::from_slice(bytes)
+        .map_err(|e| crate::error::HcError::Ingest(e.to_string()))?;
+    Ok(table_cfg
+        .schema
+        .columns
+        .iter()
+        .map(|c| v.get(&c.name).cloned().unwrap_or(Value::Null))
+        .collect())
+}
+
+/// Build a bulk `INSERT INTO <table>` statement for all rows in a window.
 ///
 /// Column list: schema columns in order, plus `_window_id`.
-/// Values: one tuple per row, with SQL-safe literals from `value_to_sql`.
-fn build_insert_sql(columns: &[ColumnDef], rows: &[Vec<Value>], window_id: u64) -> String {
+fn build_insert_sql_for_table(
+    table_name: &str,
+    columns: &[ColumnDef],
+    rows: &[Vec<Value>],
+    window_id: u64,
+) -> String {
     let col_names: Vec<String> = columns
         .iter()
         .map(|c| c.name.clone())
         .chain(std::iter::once("_window_id".to_string()))
         .collect();
-
     let col_list = col_names.join(", ");
 
     let value_tuples: Vec<String> = rows
@@ -181,15 +244,35 @@ fn build_insert_sql(columns: &[ColumnDef], rows: &[Vec<Value>], window_id: u64) 
                 .zip(columns.iter())
                 .map(|(v, col)| value_to_sql(v, &col.col_type))
                 .collect();
-            // Append the window_id as an integer literal.
             literals.push(window_id.to_string());
             format!("({})", literals.join(", "))
         })
         .collect();
 
     format!(
-        "INSERT INTO slices ({}) VALUES {}",
+        "INSERT INTO {} ({}) VALUES {}",
+        table_name,
         col_list,
         value_tuples.join(", ")
     )
+}
+
+/// Build a single-row `INSERT INTO <table>` for replace-mode rows (no _window_id).
+fn build_single_row_insert(
+    table_name: &str,
+    columns: &[ColumnDef],
+    row: &[Value],
+) -> String {
+    let col_list = columns
+        .iter()
+        .map(|c| c.name.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let vals = row
+        .iter()
+        .zip(columns.iter())
+        .map(|(v, col)| value_to_sql(v, &col.col_type))
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("INSERT INTO {} ({}) VALUES ({})", table_name, col_list, vals)
 }

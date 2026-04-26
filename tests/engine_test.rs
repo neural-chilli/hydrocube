@@ -2,24 +2,59 @@
 //
 // Integration test for the hot-path engine loop.
 
+use hydrocube::config::DataFormat;
 use hydrocube::db_manager::DbManager;
 use hydrocube::engine::run_hot_path;
+use hydrocube::ingest::RawMessage;
 use hydrocube::persistence;
 use hydrocube::publish::DeltaEvent;
 use serde_json::json;
 use std::time::Duration;
 use tokio::sync::{broadcast, mpsc, watch};
 
-/// Build a CubeConfig from the example YAML, overriding timing values for speed.
+/// Build a minimal new-format CubeConfig inline (cube.example.yaml uses the old format).
 fn test_config() -> hydrocube::config::CubeConfig {
-    let yaml = std::fs::read_to_string("cube.example.yaml")
-        .expect("cube.example.yaml must exist at repo root");
-    let mut config: hydrocube::config::CubeConfig =
-        serde_yaml::from_str(&yaml).expect("cube.example.yaml must be valid");
-    // Fast windows for testing — minimum allowed by validate() is 100 ms.
-    config.window.interval_ms = 100;
-    config.persistence.flush_interval = 1;
-    config
+    serde_yaml::from_str(r#"
+name: test_cube
+tables:
+  - name: trades
+    mode: append
+    schema:
+      columns:
+        - { name: trade_id,        type: VARCHAR }
+        - { name: book,            type: VARCHAR }
+        - { name: desk,            type: VARCHAR }
+        - { name: instrument,      type: VARCHAR }
+        - { name: instrument_type, type: VARCHAR }
+        - { name: currency,        type: VARCHAR }
+        - { name: quantity,        type: DOUBLE  }
+        - { name: price,           type: DOUBLE  }
+        - { name: notional,        type: DOUBLE  }
+        - { name: side,            type: VARCHAR }
+        - { name: trade_time,      type: VARCHAR }
+sources: []
+window:
+  interval_ms: 100
+persistence:
+  enabled: false
+  path: ":memory:"
+  flush_interval: 1
+aggregation:
+  key_columns: [book]
+  publish:
+    sql: "SELECT book, SUM(notional) AS total FROM trades WHERE _window_id > 0 GROUP BY book"
+"#).unwrap()
+}
+
+#[test]
+fn test_raw_message_has_table_field() {
+    let msg = RawMessage {
+        table: "trades".to_owned(),
+        bytes: b"{}".to_vec(),
+        format: DataFormat::Json,
+    };
+    assert_eq!(msg.table, "trades");
+    assert_eq!(msg.bytes, b"{}");
 }
 
 #[tokio::test]
@@ -29,8 +64,10 @@ async fn test_hot_path_processes_messages() {
 
     // Initialise persistence tables (slices, consolidated, _cube_metadata).
     persistence::init(&db, &config).await.unwrap();
+    // Initialise per-table DuckDB tables (trades, etc.).
+    persistence::init_tables(&db, &config.tables).await.unwrap();
 
-    let (raw_tx, raw_rx) = mpsc::channel::<Vec<u8>>(100);
+    let (raw_tx, raw_rx) = mpsc::channel::<RawMessage>(100);
     let (broadcast_tx, mut broadcast_rx) = broadcast::channel::<DeltaEvent>(100);
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
@@ -70,11 +107,19 @@ async fn test_hot_path_processes_messages() {
     });
 
     raw_tx
-        .send(serde_json::to_vec(&trade1).unwrap())
+        .send(RawMessage {
+            table: "trades".to_owned(),
+            bytes: serde_json::to_vec(&trade1).unwrap(),
+            format: DataFormat::Json,
+        })
         .await
         .unwrap();
     raw_tx
-        .send(serde_json::to_vec(&trade2).unwrap())
+        .send(RawMessage {
+            table: "trades".to_owned(),
+            bytes: serde_json::to_vec(&trade2).unwrap(),
+            format: DataFormat::Json,
+        })
         .await
         .unwrap();
 
