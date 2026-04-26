@@ -123,6 +123,15 @@ async fn main() {
         std::process::exit(exit_code::PERSISTENCE_FAILURE);
     }
 
+    // Create all user-declared tables (e.g. "trades") from the config.
+    // `persistence::init` only creates the engine-internal tables (slices,
+    // consolidated, _cube_metadata); the named tables the engine actually
+    // inserts into must be created separately.
+    if let Err(e) = persistence::init_tables(&db, &config.tables).await {
+        error!("Table init failed: {}", e);
+        std::process::exit(exit_code::PERSISTENCE_FAILURE);
+    }
+
     // -------------------------------------------------------------------------
     // 9. Verify config hash (unless --rebuild just reset it)
     // -------------------------------------------------------------------------

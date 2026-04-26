@@ -194,8 +194,14 @@ pub async fn reset(db: &DbManager, config: &CubeConfig) -> HcResult<()> {
         .await?;
     db.execute("DROP TABLE IF EXISTS _cube_metadata", vec![])
         .await?;
+    // Drop user-declared tables too
+    for table in &config.tables {
+        db.execute(&format!("DROP TABLE IF EXISTS {}", table.name), vec![])
+            .await?;
+    }
     info!(target: "persistence", "tables dropped for reset");
-    init(db, config).await
+    init(db, config).await?;
+    init_tables(db, &config.tables).await
 }
 
 /// Drop `consolidated` and `_cube_metadata`, re-init, then import any Parquet
