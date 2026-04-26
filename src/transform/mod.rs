@@ -4,6 +4,7 @@
 // output into the next.  All DuckDB access is channelled through DbManager.
 
 pub mod lua;
+pub mod lua_ctx;
 pub mod sql;
 
 use serde_json::Value;
