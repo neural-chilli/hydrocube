@@ -93,9 +93,9 @@ pub async fn start_server(
 ) -> HcResult<()> {
     // Pre-compute the snapshot SQL with synthetic _key column so the snapshot
     // endpoint returns the same schema as the engine's delta broadcasts.
-    let snapshot_sql = AggSqlGenerator::from_user_sql(&config.aggregation.sql)
+    let snapshot_sql = AggSqlGenerator::from_user_sql(&config.aggregation.publish.sql)
         .map(|g| g.full_aggregation_sql_with_key())
-        .unwrap_or_else(|_| config.aggregation.sql.clone());
+        .unwrap_or_else(|_| config.aggregation.publish.sql.clone());
 
     let state = Arc::new(AppState {
         db,

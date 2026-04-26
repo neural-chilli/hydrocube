@@ -185,23 +185,12 @@ async fn main() {
     let (raw_tx, raw_rx) = tokio::sync::mpsc::channel::<Vec<u8>>(10_000);
 
     // Spawn Kafka ingest (only when kafka feature enabled and source is kafka)
+    // Kafka ingest is handled per-source in the new config model.
+    // This will be wired up in a later task; skipping for now.
     #[cfg(feature = "kafka")]
     {
-        if config.source.source_type == "kafka" {
-            use hydrocube::ingest::kafka::KafkaSource;
-            use hydrocube::ingest::IngestSource;
-            let source = KafkaSource::new(&config.source).unwrap_or_else(|e| {
-                eprintln!("ERROR: Kafka source init failed: {}", e);
-                std::process::exit(exit_code::SOURCE_CONNECTION_FAILURE);
-            });
-            let ingest_shutdown = shutdown_rx.clone();
-            let ingest_tx = raw_tx.clone();
-            tokio::spawn(async move {
-                if let Err(e) = source.run(ingest_tx, ingest_shutdown).await {
-                    tracing::error!("Ingest error: {}", e);
-                }
-            });
-        }
+        // Future: iterate config.sources and start KafkaSource for each kafka source.
+        let _ = &raw_tx; // suppress unused warning
     }
 
     // Drop our copy of raw_tx so channel closes when ingest stops
@@ -229,12 +218,11 @@ async fn main() {
     // -------------------------------------------------------------------------
     // 14. Start web server if UI enabled
     // -------------------------------------------------------------------------
-    let ui_enabled = !cli.no_ui && config.ui.as_ref().map(|u| u.enabled).unwrap_or(false);
+    // In the new config, UI is always enabled unless --no-ui is passed.
+    let ui_enabled = !cli.no_ui;
 
     if ui_enabled {
-        let port = cli
-            .ui_port
-            .unwrap_or_else(|| config.ui.as_ref().map(|u| u.port).unwrap_or(8080));
+        let port = cli.ui_port.unwrap_or(8080);
 
         let db_web = db.clone();
         let config_web = config.clone();

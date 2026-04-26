@@ -36,9 +36,14 @@ pub async fn run_hot_path(
     // -------------------------------------------------------------------------
     // Setup
     // -------------------------------------------------------------------------
-    let parser = JsonParser::new(&config.schema.columns);
+    // Use the first table's columns as the schema for the hot path.
+    // In future tasks this will be per-table; for now use an empty slice if no tables.
+    let hot_columns: Vec<crate::config::ColumnDef> = config.tables.first()
+        .map(|t| t.schema.columns.clone())
+        .unwrap_or_default();
+    let parser = JsonParser::new(&hot_columns);
 
-    let agg_gen = AggSqlGenerator::from_user_sql(&config.aggregation.sql)?;
+    let agg_gen = AggSqlGenerator::from_user_sql(&config.aggregation.publish.sql)?;
     let dimension_names: Vec<String> = agg_gen.dimensions().iter().map(|d| d.to_string()).collect();
     let mut detector = DeltaDetector::new(dimension_names);
 
@@ -47,10 +52,8 @@ pub async fn run_hot_path(
     // used by the Perspective viewer as a stable row index for true upserts.
     let agg_sql = agg_gen.full_aggregation_sql_with_key();
 
-    let pipeline = config
-        .transform
-        .as_ref()
-        .map(|steps| TransformPipeline::new(steps.clone()));
+    // In the new config, transforms are per-source; no top-level transform.
+    let pipeline: Option<TransformPipeline> = None;
 
     let mut buffer: Vec<Vec<Value>> = Vec::new();
     let mut tick = tokio::time::interval(Duration::from_millis(config.window.interval_ms));
@@ -80,7 +83,7 @@ pub async fn run_hot_path(
                 // Transform if configured
                 let rows = if let Some(ref pipeline) = pipeline {
                     pipeline
-                        .execute(&db, &config.schema.columns, std::mem::take(&mut buffer))
+                        .execute(&db, &hot_columns, std::mem::take(&mut buffer))
                         .await?
                 } else {
                     std::mem::take(&mut buffer)
@@ -91,7 +94,7 @@ pub async fn run_hot_path(
                 }
 
                 // Insert rows into slices table
-                let insert_sql = build_insert_sql(&config.schema.columns, &rows, window_id);
+                let insert_sql = build_insert_sql(&hot_columns, &rows, window_id);
                 db.execute(insert_sql, vec![]).await?;
 
                 // Aggregate all retained slices.

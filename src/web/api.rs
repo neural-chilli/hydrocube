@@ -124,8 +124,10 @@ pub struct ColumnInfo {
 pub async fn schema_handler(State(state): State<Arc<AppState>>) -> ApiResult<Json<SchemaResponse>> {
     let columns = state
         .config
-        .schema
-        .columns
+        .tables
+        .first()
+        .map(|t| t.schema.columns.as_slice())
+        .unwrap_or(&[])
         .iter()
         .map(|c| ColumnInfo {
             name: c.name.clone(),
@@ -136,7 +138,7 @@ pub async fn schema_handler(State(state): State<Arc<AppState>>) -> ApiResult<Jso
     Ok(Json(SchemaResponse {
         cube_name: state.config.name.clone(),
         columns,
-        aggregation_sql: state.config.aggregation.sql.clone(),
+        aggregation_sql: state.config.aggregation.publish.sql.clone(),
     }))
 }
 
