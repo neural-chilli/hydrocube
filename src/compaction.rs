@@ -1,9 +1,8 @@
 // src/compaction.rs
 //
-// CompactionThread periodically exports old slices to Parquet files,
-// deletes them from DuckDB, and updates the compaction cutoff.
-//
-// All DuckDB access goes through DbManager to allow hot-path interleaving.
+// CompactionThread periodically runs the user-defined compaction SQL (if
+// configured) and/or exports old slices to Parquet, then advances the
+// compaction cutoff.  All DuckDB access goes through DbManager.
 
 use tokio::sync::watch;
 use tokio::time::{interval, Duration};
@@ -13,6 +12,7 @@ use crate::aggregation::window::{compaction_cutoff, set_compaction_cutoff, WINDO
 use crate::config::CubeConfig;
 use crate::db_manager::DbManager;
 use crate::error::HcResult;
+use crate::hooks::runner::HookRunner;
 use crate::persistence;
 use crate::retention::RetentionManager;
 
@@ -153,9 +153,24 @@ impl CompactionThread {
             }
         }
 
-        // Step 5: Delete old slices from DuckDB.
-        let delete_sql = format!("DELETE FROM slices WHERE _window_id <= {}", cutoff);
-        self.db.execute(&delete_sql, vec![]).await?;
+        // Step 5: Run user-defined compaction SQL (new model) or fall back to
+        // deleting from the legacy `slices` table.
+        let has_user_sql = self.config.aggregation.compaction.as_ref()
+            .and_then(|c| c.sql.as_ref())
+            .is_some();
+
+        if has_user_sql {
+            // New model: run the user's compaction SQL with {pending.table},
+            // {cutoff}, and {new_cutoff} tokens expanded.
+            let runner = HookRunner::new(self.config.clone(), self.db.clone());
+            if let Err(e) = runner.run_compaction(cutoff).await {
+                warn!(target: "compaction", "compaction SQL error: {}", e);
+            }
+        } else {
+            // Legacy model: delete rows from the `slices` table.
+            let delete_sql = format!("DELETE FROM slices WHERE _window_id <= {}", cutoff);
+            self.db.execute(&delete_sql, vec![]).await?;
+        }
 
         // Step 6: Advance the in-memory atomic.
         set_compaction_cutoff(cutoff);
