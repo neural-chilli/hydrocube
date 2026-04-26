@@ -35,8 +35,12 @@ sources:
 
 aggregation:
   key_columns: [book, desk, instrument_type, currency]
+
   compaction:
     interval: "1m"
+    sql: |
+      INSERT INTO consolidated SELECT * FROM {pending.trades}
+
   publish:
     sql: |
       SELECT
@@ -44,12 +48,25 @@ aggregation:
         desk,
         instrument_type,
         currency,
-        SUM(notional) AS total_notional,
+        SUM(notional)                                                AS total_notional,
         SUM(CASE WHEN side = 'BUY' THEN quantity ELSE -quantity END) AS net_quantity,
-        COUNT(*) AS trade_count,
-        AVG(price) AS avg_price,
-        MAX(trade_time) AS max_trade_time
-      FROM trades
+        COUNT(*)                                                      AS trade_count,
+        SUM(notional) / NULLIF(SUM(quantity), 0)                     AS avg_price,
+        MAX(trade_time)                                               AS max_trade_time
+      FROM (
+        SELECT book, desk, instrument_type, currency,
+               notional, side, quantity, trade_time
+        FROM consolidated
+
+        UNION ALL
+
+        SELECT book, desk, instrument_type, currency,
+               notional, side, quantity, trade_time
+        FROM trades
+        WHERE _window_id > (
+          SELECT COALESCE(MAX(compaction_cutoff), 0) FROM _cube_metadata
+        )
+      ) all_trades
       GROUP BY book, desk, instrument_type, currency
 
 window:
