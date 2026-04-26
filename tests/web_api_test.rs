@@ -14,6 +14,7 @@ fn make_state(config: hydrocube::config::CubeConfig, db: DbManager) -> Arc<AppSt
         config,
         start_time: Instant::now(),
         broadcast_tx,
+        ingest_tx: None,
     })
 }
 

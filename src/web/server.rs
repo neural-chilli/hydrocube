@@ -18,10 +18,12 @@ use crate::aggregation::sql_gen::AggSqlGenerator;
 use crate::config::CubeConfig;
 use crate::db_manager::DbManager;
 use crate::error::{HcError, HcResult};
+use crate::ingest::IngestSender;
 use crate::publish::DeltaEvent;
 
 use super::api::{drillthrough_handler, query_handler, reaggregate_handler, schema_handler, snapshot_handler, status_handler, AppState};
 use super::assets::static_handler;
+use super::http_ingest::http_ingest_handler;
 
 // ---------------------------------------------------------------------------
 // SSE handler — extracts broadcast_tx from AppState and delegates to sse module
@@ -90,6 +92,7 @@ pub async fn start_server(
     config: CubeConfig,
     broadcast_tx: broadcast::Sender<DeltaEvent>,
     port: u16,
+    ingest_tx: Option<IngestSender>,
 ) -> HcResult<()> {
     // Pre-compute the snapshot SQL with synthetic _key column so the snapshot
     // endpoint returns the same schema as the engine's delta broadcasts.
@@ -103,6 +106,7 @@ pub async fn start_server(
         snapshot_sql,
         start_time: std::time::Instant::now(),
         broadcast_tx,
+        ingest_tx,
     });
 
     let router = Router::new()
@@ -113,6 +117,7 @@ pub async fn start_server(
         .route("/api/query", post(query_handler))
         .route("/api/drillthrough/{table}", get(drillthrough_handler))
         .route("/api/reaggregate", post(reaggregate_handler))
+        .route("/ingest/{table}", post(http_ingest_handler))
         // SSE stream
         .route("/api/stream", get(sse_handler))
         // Static assets

@@ -33,6 +33,9 @@ pub struct AppState {
     pub snapshot_sql: String,
     pub start_time: Instant,
     pub broadcast_tx: broadcast::Sender<DeltaEvent>,
+    /// Optional channel for HTTP-based ingest. `None` when the engine is not
+    /// running (e.g. validate-only mode) or the channel is not wired up.
+    pub ingest_tx: Option<crate::ingest::IngestSender>,
 }
 
 // ---------------------------------------------------------------------------
