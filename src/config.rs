@@ -382,6 +382,14 @@ impl CubeConfig {
                 )));
             }
         }
+        let mut seen_names = std::collections::HashSet::new();
+        for table in &self.tables {
+            if !seen_names.insert(&table.name) {
+                return Err(HcError::Config(format!(
+                    "duplicate table name: '{}'", table.name
+                )));
+            }
+        }
         for src in &self.sources {
             if let Some(r) = &src.path_resolver {
                 if src.name.is_none() {
@@ -405,6 +413,11 @@ impl CubeConfig {
                     )));
                 }
             }
+        }
+        if let Some(c) = &self.aggregation.compaction {
+            c.interval_seconds().map_err(|_| HcError::Config(format!(
+                "aggregation.compaction.interval is invalid: '{}'", c.interval
+            )))?;
         }
         Ok(())
     }
