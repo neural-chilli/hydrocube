@@ -195,3 +195,40 @@ fn test_parse_duration_str() {
     assert!(parse_duration_str("5x").is_err());
     assert!(parse_duration_str("").is_err());
 }
+
+#[test]
+fn test_schema_hash_changes_when_publish_sql_changes() {
+    let cfg1: CubeConfig = serde_yaml::from_str(minimal_new_config_yaml()).unwrap();
+    let yaml2 = minimal_new_config_yaml().replace(
+        "SELECT book, SUM(notional) AS total FROM {trades} GROUP BY book",
+        "SELECT book, COUNT(*) AS n FROM {trades} GROUP BY book",
+    );
+    let cfg2: CubeConfig = serde_yaml::from_str(&yaml2).unwrap();
+    assert_ne!(cfg1.schema_hash(), cfg2.schema_hash());
+}
+
+#[test]
+fn test_schema_hash_changes_when_table_schema_changes() {
+    let cfg1: CubeConfig = serde_yaml::from_str(minimal_new_config_yaml()).unwrap();
+    let yaml2 = minimal_new_config_yaml().replace(
+        "- { name: notional, type: DOUBLE }",
+        "- { name: notional, type: DOUBLE }\n        - { name: currency, type: VARCHAR }",
+    );
+    let cfg2: CubeConfig = serde_yaml::from_str(&yaml2).unwrap();
+    assert_ne!(cfg1.schema_hash(), cfg2.schema_hash());
+}
+
+#[test]
+fn test_schema_hash_is_deterministic() {
+    let cfg: CubeConfig = serde_yaml::from_str(minimal_new_config_yaml()).unwrap();
+    assert_eq!(cfg.schema_hash(), cfg.schema_hash());
+}
+
+#[test]
+fn test_schema_hash_stable_when_window_changes() {
+    // Window interval is not a schema-affecting change — no --rebuild required
+    let cfg1: CubeConfig = serde_yaml::from_str(minimal_new_config_yaml()).unwrap();
+    let yaml2 = minimal_new_config_yaml().replace("interval_ms: 1000", "interval_ms: 500");
+    let cfg2: CubeConfig = serde_yaml::from_str(&yaml2).unwrap();
+    assert_eq!(cfg1.schema_hash(), cfg2.schema_hash());
+}
