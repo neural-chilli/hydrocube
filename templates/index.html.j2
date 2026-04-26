@@ -6,7 +6,7 @@
   <title>HydroCube — {{ cube_name }}</title>
 
   <link id="theme-css"    rel="stylesheet" href="/assets/bootswatch/flatly.min.css">
-  <link id="psp-theme-css" rel="stylesheet" href="/assets/perspective/css/pro.css">
+  <link rel="stylesheet"                    href="/assets/perspective/css/themes.css">
   <link rel="stylesheet"                    href="/assets/perspective/css/icons.css">
   <link rel="stylesheet"                    href="/assets/codemirror/codemirror.min.css">
 
@@ -337,20 +337,16 @@ const THEMES = {
   light: '/assets/bootswatch/flatly.min.css',
   dark:  '/assets/bootswatch/darkly.min.css',
 };
-const PSP_THEMES = {
-  light: '/assets/perspective/css/pro.css',
-  dark:  '/assets/perspective/css/pro-dark.css',
-};
 let currentTheme = localStorage.getItem('hc_theme') || 'light';
 
 const viewerEl   = document.getElementById('perspective-viewer');
 const pspLoading = document.getElementById('psp-loading');
 
 function applyTheme(t) {
-  document.getElementById('theme-css').href     = THEMES[t]     ?? THEMES.light;
-  document.getElementById('psp-theme-css').href = PSP_THEMES[t] ?? PSP_THEMES.light;
+  document.getElementById('theme-css').href = THEMES[t] ?? THEMES.light;
   document.documentElement.setAttribute('data-bs-theme', t);
   document.getElementById('theme-btn').textContent = t === 'dark' ? '☀️' : '🌙';
+  // themes.css defines both Pro Light and Pro Dark; the theme attribute selects between them.
   if (viewerEl) viewerEl.setAttribute('theme', t === 'dark' ? 'Pro Dark' : 'Pro Light');
   currentTheme = t;
   localStorage.setItem('hc_theme', t);
