@@ -1,5 +1,6 @@
 // src/ingest/mod.rs
 pub mod file;
+pub mod nats;
 pub mod parser;
 
 #[cfg(feature = "kafka")]
