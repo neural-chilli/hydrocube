@@ -7,16 +7,24 @@
 # Usage:
 #   ./scripts/run-test-env.sh              # default: 50 trades/sec
 #   ./scripts/run-test-env.sh --rate 200   # faster
+#   ./scripts/run-test-env.sh --reset      # wipe .local/ state before starting
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 RATE=50
+RESET=false
+UI_PORT=8081
+CONFIG=cube.test.yaml
+
 while [ $# -gt 0 ]; do
     case "$1" in
-        --rate) RATE="${2:-50}"; shift 2 ;;
-        *)      RATE="$1"; shift ;;
+        --rate)     RATE="${2:-50}"; shift 2 ;;
+        --reset)    RESET=true; shift ;;
+        --port)     UI_PORT="${2:-8081}"; shift 2 ;;
+        --config)   CONFIG="$2"; shift 2 ;;
+        *)          RATE="$1"; shift ;;
     esac
 done
 
@@ -66,6 +74,19 @@ if ! command -v python3 &>/dev/null; then
     exit 1
 fi
 
+if [ ! -f "$CONFIG" ]; then
+    err "Config file not found: $CONFIG"
+    exit 1
+fi
+
+# Validate config before starting anything
+log "Validating config: $CONFIG"
+if ! cargo run -- --config "$CONFIG" --validate 2>&1 | grep -q "Config OK"; then
+    err "Config validation failed. Run: cargo run -- --config $CONFIG --validate"
+    exit 1
+fi
+log "Config OK."
+
 # ---------------------------------------------------------------------------
 # 1. Start Kafka
 # ---------------------------------------------------------------------------
@@ -107,10 +128,11 @@ log "Build complete."
 # ---------------------------------------------------------------------------
 mkdir -p .local/slices
 
-# Reset if previous state exists (clean test each time)
-if [ -f .local/positions.db ]; then
-    warn "Removing previous test state (.local/positions.db)"
+if [ "$RESET" = true ] && [ -f .local/positions.db ]; then
+    warn "--reset: removing previous test state (.local/positions.db)"
     rm -f .local/positions.db .local/positions.db.wal
+elif [ -f .local/positions.db ]; then
+    warn "Existing state found at .local/positions.db (use --reset to wipe)"
 fi
 
 # ---------------------------------------------------------------------------
@@ -125,30 +147,41 @@ fi
 # 5. Start HydroCube
 # ---------------------------------------------------------------------------
 echo ""
-log "${CYAN}Starting HydroCube...${NC}"
-log "  Config:  cube.test.yaml"
-log "  UI:      http://localhost:8080"
-log "  Status:  http://localhost:8080/api/status"
-log "  SSE:     http://localhost:8080/api/stream"
+log "Starting HydroCube..."
+log "  Config:   $CONFIG"
+log "  UI:       http://localhost:${UI_PORT}"
+log "  Status:   http://localhost:${UI_PORT}/api/status"
+log "  Snapshot: http://localhost:${UI_PORT}/api/snapshot"
+log "  SSE:      curl -N http://localhost:${UI_PORT}/api/stream"
+log "  Ingest:   POST http://localhost:${UI_PORT}/ingest/trades"
 echo ""
 
-cargo run -- --config cube.test.yaml &
+cargo run -- --config "$CONFIG" --ui-port "$UI_PORT" &
 HC_PID=$!
 PIDS+=("$HC_PID")
 
-# Give HydroCube a moment to start and create tables
-sleep 3
-
-# Check it's still running
-if ! kill -0 "$HC_PID" 2>/dev/null; then
-    err "HydroCube exited immediately. Check output above."
-    exit 1
-fi
+# Wait for HydroCube to start (poll /api/status rather than sleeping blindly)
+log "Waiting for HydroCube to be ready..."
+for i in $(seq 1 20); do
+    if curl -sf "http://localhost:${UI_PORT}/api/status" &>/dev/null; then
+        log "HydroCube is ready."
+        break
+    fi
+    if ! kill -0 "$HC_PID" 2>/dev/null; then
+        err "HydroCube exited unexpectedly. Check output above."
+        exit 1
+    fi
+    if [ "$i" -eq 20 ]; then
+        err "HydroCube did not become ready within 20s."
+        exit 1
+    fi
+    sleep 1
+done
 
 # ---------------------------------------------------------------------------
 # 6. Start trade generator
 # ---------------------------------------------------------------------------
-log "${CYAN}Starting trade generator (${RATE} trades/sec)...${NC}"
+log "Starting trade generator (${RATE} trades/sec)..."
 echo ""
 
 python3 tools/generate_trades.py --rate "$RATE" &
@@ -162,12 +195,14 @@ echo ""
 log "=========================================="
 log "  Test environment is running!"
 log ""
-log "  UI:        ${CYAN}http://localhost:8081${NC}"
-log "  Status:    ${CYAN}http://localhost:8081/api/status${NC}"
-log "  Snapshot:  ${CYAN}http://localhost:8081/api/snapshot${NC}"
-log "  SSE:       ${CYAN}curl -N http://localhost:8081/api/stream${NC}"
+log "  UI:        ${CYAN}http://localhost:${UI_PORT}${NC}"
+log "  Status:    ${CYAN}http://localhost:${UI_PORT}/api/status${NC}"
+log "  Snapshot:  ${CYAN}http://localhost:${UI_PORT}/api/snapshot${NC}"
+log "  SSE:       ${CYAN}curl -N http://localhost:${UI_PORT}/api/stream${NC}"
+log "  Drillthru: ${CYAN}http://localhost:${UI_PORT}/api/drillthrough/trades${NC}"
+log "  Ingest:    ${CYAN}POST http://localhost:${UI_PORT}/ingest/trades${NC}"
 log ""
-log "  Trade rate: ${RATE}/sec"
+log "  Trade rate: ${RATE}/sec  |  Config: ${CONFIG}"
 log "  Press Ctrl+C to stop everything."
 log "=========================================="
 echo ""

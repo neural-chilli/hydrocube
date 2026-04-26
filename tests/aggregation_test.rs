@@ -3,10 +3,7 @@
 // Integration tests for the aggregation hot path: slice insertion,
 // full aggregation SQL, and Arrow output.
 
-use hydrocube::config::{
-    AggregationConfig, ColumnDef, CompactionConfig, CubeConfig, PersistenceConfig, RetentionConfig,
-    SchemaConfig, SourceConfig, WindowConfig,
-};
+use hydrocube::config::CubeConfig;
 use hydrocube::db_manager::DbManager;
 use hydrocube::persistence;
 
@@ -16,94 +13,49 @@ use hydrocube::persistence;
 
 /// Build a CubeConfig that mirrors the schema in cube.example.yaml.
 fn trading_config() -> CubeConfig {
-    CubeConfig {
-        name: "trading_positions".into(),
-        description: Some("Real-time position aggregation by book".into()),
-        source: SourceConfig {
-            source_type: "test".into(),
-            brokers: None,
-            topic: None,
-            group_id: None,
-            format: "json".into(),
-        },
-        schema: SchemaConfig {
-            columns: vec![
-                ColumnDef {
-                    name: "trade_id".into(),
-                    col_type: "VARCHAR".into(),
-                },
-                ColumnDef {
-                    name: "book".into(),
-                    col_type: "VARCHAR".into(),
-                },
-                ColumnDef {
-                    name: "desk".into(),
-                    col_type: "VARCHAR".into(),
-                },
-                ColumnDef {
-                    name: "instrument".into(),
-                    col_type: "VARCHAR".into(),
-                },
-                ColumnDef {
-                    name: "instrument_type".into(),
-                    col_type: "VARCHAR".into(),
-                },
-                ColumnDef {
-                    name: "currency".into(),
-                    col_type: "VARCHAR".into(),
-                },
-                ColumnDef {
-                    name: "quantity".into(),
-                    col_type: "DOUBLE".into(),
-                },
-                ColumnDef {
-                    name: "price".into(),
-                    col_type: "DOUBLE".into(),
-                },
-                ColumnDef {
-                    name: "notional".into(),
-                    col_type: "DOUBLE".into(),
-                },
-                ColumnDef {
-                    name: "side".into(),
-                    col_type: "VARCHAR".into(),
-                },
-                ColumnDef {
-                    name: "trade_time".into(),
-                    col_type: "TIMESTAMP".into(),
-                },
-            ],
-        },
-        transform: None,
-        aggregation: AggregationConfig {
-            sql: "SELECT\n  book,\n  desk,\n  instrument_type,\n  currency,\n  \
-                  SUM(notional) AS total_notional,\n  \
-                  SUM(CASE WHEN side = 'BUY' THEN quantity ELSE -quantity END) AS net_quantity,\n  \
-                  COUNT(*) AS trade_count,\n  \
-                  AVG(price) AS avg_price,\n  \
-                  MAX(trade_time) AS max_trade_time\n\
-                  FROM slices\n\
-                  GROUP BY book, desk, instrument_type, currency"
-                .into(),
-        },
-        window: WindowConfig { interval_ms: 1000 },
-        compaction: CompactionConfig {
-            interval_windows: 60,
-        },
-        retention: RetentionConfig {
-            duration: "1d".into(),
-            parquet_path: "/tmp/test_parquet".into(),
-        },
-        persistence: PersistenceConfig {
-            enabled: false,
-            path: ":memory:".into(),
-            flush_interval: 10,
-        },
-        publish: None,
-        ui: None,
-        auth: None,
-        log_level: "info".into(),
-    }
+    serde_yaml::from_str(r#"
+name: trading_positions
+description: "Real-time position aggregation by book"
+tables:
+  - name: slices
+    mode: append
+    schema:
+      columns:
+        - { name: trade_id,        type: VARCHAR    }
+        - { name: book,            type: VARCHAR    }
+        - { name: desk,            type: VARCHAR    }
+        - { name: instrument,      type: VARCHAR    }
+        - { name: instrument_type, type: VARCHAR    }
+        - { name: currency,        type: VARCHAR    }
+        - { name: quantity,        type: DOUBLE     }
+        - { name: price,           type: DOUBLE     }
+        - { name: notional,        type: DOUBLE     }
+        - { name: side,            type: VARCHAR    }
+        - { name: trade_time,      type: TIMESTAMP  }
+sources: []
+window:
+  interval_ms: 1000
+persistence:
+  enabled: false
+  path: ":memory:"
+  flush_interval: 10
+aggregation:
+  key_columns: [book]
+  publish:
+    sql: >-
+      SELECT
+        book,
+        desk,
+        instrument_type,
+        currency,
+        SUM(notional) AS total_notional,
+        SUM(CASE WHEN side = 'BUY' THEN quantity ELSE -quantity END) AS net_quantity,
+        COUNT(*) AS trade_count,
+        AVG(price) AS avg_price,
+        MAX(trade_time) AS max_trade_time
+      FROM slices
+      GROUP BY book, desk, instrument_type, currency
+"#).unwrap()
 }
 
 /// Open a fresh in-memory DbManager and initialise it with the trading config.
@@ -143,8 +95,9 @@ async fn test_basic_aggregation_from_slices() {
     insert_test_trades(&db, 1).await;
 
     // Run the full aggregation SQL from config.
+    let sql = &config.aggregation.publish.sql;
     let rows = db
-        .query_json(&config.aggregation.sql, vec![])
+        .query_json(sql, vec![])
         .await
         .expect("aggregation query failed");
 
@@ -214,8 +167,9 @@ async fn test_aggregation_returns_arrow() {
     insert_test_trades(&db, 1).await;
 
     // Run the aggregation via the Arrow path.
+    let sql = &config.aggregation.publish.sql;
     let batches = db
-        .query_arrow(&config.aggregation.sql)
+        .query_arrow(sql)
         .await
         .expect("query_arrow failed");
 

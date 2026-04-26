@@ -4,6 +4,7 @@
 // output into the next.  All DuckDB access is channelled through DbManager.
 
 pub mod lua;
+pub mod lua_ctx;
 pub mod sql;
 
 use serde_json::Value;
@@ -46,12 +47,21 @@ impl TransformPipeline {
                     transform.execute(db, columns, current).await?
                 }
                 TransformStep::Lua {
-                    script,
                     function,
+                    inline,
+                    script,
                     init,
                 } => {
-                    let transform =
-                        LuaTransform::from_file(script.clone(), function.clone(), init.clone())?;
+                    // Prefer inline Lua, then fall back to script file.
+                    let transform = if let Some(script_path) = script.clone() {
+                        LuaTransform::from_file(script_path, function.clone(), init.clone())?
+                    } else {
+                        // inline or neither — from_file expects a path; skip gracefully
+                        return Err(crate::error::HcError::Transform(
+                            "Lua transform requires a script path".into(),
+                        ));
+                    };
+                    let _ = inline; // may be used in future
                     // Use batch mode when the function name contains "batch",
                     // otherwise fall back to per-message mode.
                     if function.contains("batch") {

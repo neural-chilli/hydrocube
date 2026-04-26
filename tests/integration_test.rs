@@ -2,10 +2,15 @@
 //
 // End-to-end integration tests for the full HydroCube pipeline
 // (without Kafka).
+//
+// NOTE: This test is temporarily stubbed out pending the engine rebuild in
+// later tasks. The config struct has been replaced; this file will be
+// restored in Task 2+.
 
+#[allow(unused_imports)]
 use hydrocube::config::{
-    AggregationConfig, ColumnDef, CompactionConfig, CubeConfig, PersistenceConfig, RetentionConfig,
-    SchemaConfig, SourceConfig, WindowConfig,
+    AggregationConfig, ColumnDef, CubeConfig, PersistenceConfig,
+    PublishHookConfig, SchemaConfig, TableConfig, TableMode, WindowConfig,
 };
 use hydrocube::db_manager::DbManager;
 use hydrocube::delta::DeltaDetector;
@@ -17,96 +22,47 @@ use hydrocube::publish::batch_to_base64_arrow;
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Build a CubeConfig mirroring cube.example.yaml.
+/// Build a CubeConfig using the new multi-table config shape.
 fn trading_config() -> CubeConfig {
-    CubeConfig {
-        name: "trading_positions".into(),
-        description: Some("Real-time position aggregation by book".into()),
-        source: SourceConfig {
-            source_type: "test".into(),
-            brokers: None,
-            topic: None,
-            group_id: None,
-            format: "json".into(),
-        },
-        schema: SchemaConfig {
-            columns: vec![
-                ColumnDef {
-                    name: "trade_id".into(),
-                    col_type: "VARCHAR".into(),
-                },
-                ColumnDef {
-                    name: "book".into(),
-                    col_type: "VARCHAR".into(),
-                },
-                ColumnDef {
-                    name: "desk".into(),
-                    col_type: "VARCHAR".into(),
-                },
-                ColumnDef {
-                    name: "instrument".into(),
-                    col_type: "VARCHAR".into(),
-                },
-                ColumnDef {
-                    name: "instrument_type".into(),
-                    col_type: "VARCHAR".into(),
-                },
-                ColumnDef {
-                    name: "currency".into(),
-                    col_type: "VARCHAR".into(),
-                },
-                ColumnDef {
-                    name: "quantity".into(),
-                    col_type: "DOUBLE".into(),
-                },
-                ColumnDef {
-                    name: "price".into(),
-                    col_type: "DOUBLE".into(),
-                },
-                ColumnDef {
-                    name: "notional".into(),
-                    col_type: "DOUBLE".into(),
-                },
-                ColumnDef {
-                    name: "side".into(),
-                    col_type: "VARCHAR".into(),
-                },
-                ColumnDef {
-                    name: "trade_time".into(),
-                    col_type: "TIMESTAMP".into(),
-                },
-            ],
-        },
-        transform: None,
-        aggregation: AggregationConfig {
-            sql: "SELECT book, desk, instrument_type, currency, \
-                  SUM(notional) AS total_notional, \
-                  SUM(CASE WHEN side = 'BUY' THEN quantity ELSE -quantity END) AS net_quantity, \
-                  COUNT(*) AS trade_count, \
-                  AVG(price) AS avg_price, \
-                  MAX(trade_time) AS max_trade_time \
-                  FROM slices \
-                  GROUP BY book, desk, instrument_type, currency"
-                .into(),
-        },
-        window: WindowConfig { interval_ms: 1000 },
-        compaction: CompactionConfig {
-            interval_windows: 60,
-        },
-        retention: RetentionConfig {
-            duration: "1d".into(),
-            parquet_path: "/tmp/test_parquet".into(),
-        },
-        persistence: PersistenceConfig {
-            enabled: false,
-            path: ":memory:".into(),
-            flush_interval: 10,
-        },
-        publish: None,
-        ui: None,
-        auth: None,
-        log_level: "info".into(),
-    }
+    serde_yaml::from_str(r#"
+name: trading_positions
+description: Real-time position aggregation by book
+tables:
+  - name: trades
+    mode: append
+    schema:
+      columns:
+        - { name: trade_id,        type: VARCHAR   }
+        - { name: book,            type: VARCHAR   }
+        - { name: desk,            type: VARCHAR   }
+        - { name: instrument,      type: VARCHAR   }
+        - { name: instrument_type, type: VARCHAR   }
+        - { name: currency,        type: VARCHAR   }
+        - { name: quantity,        type: DOUBLE    }
+        - { name: price,           type: DOUBLE    }
+        - { name: notional,        type: DOUBLE    }
+        - { name: side,            type: VARCHAR   }
+        - { name: trade_time,      type: TIMESTAMP }
+sources: []
+window:
+  interval_ms: 1000
+persistence:
+  enabled: false
+  path: ":memory:"
+  flush_interval: 10
+aggregation:
+  key_columns: [book, desk, instrument_type, currency]
+  publish:
+    sql: >-
+      SELECT book, desk, instrument_type, currency,
+             SUM(notional) AS total_notional,
+             SUM(CASE WHEN side = 'BUY' THEN quantity ELSE -quantity END) AS net_quantity,
+             COUNT(*) AS trade_count,
+             AVG(price) AS avg_price,
+             MAX(trade_time) AS max_trade_time
+      FROM slices
+      GROUP BY book, desk, instrument_type, currency
+"#).unwrap()
 }
 
 /// Open and initialise a fresh in-memory database.
@@ -148,8 +104,9 @@ async fn test_end_to_end_pipeline() {
     insert_test_trades(&db, 1).await;
 
     // Step 5: Run aggregation SQL via query_arrow.
+    let agg_sql = &config.aggregation.publish.sql;
     let batches = db
-        .query_arrow(&config.aggregation.sql)
+        .query_arrow(agg_sql)
         .await
         .expect("query_arrow failed");
 
@@ -169,10 +126,9 @@ async fn test_end_to_end_pipeline() {
         "instrument_type".to_string(),
         "currency".to_string(),
     ];
-    let mut detector = DeltaDetector::new(dimension_names);
+    let mut detector = DeltaDetector::new(dimension_names, 0.0);
 
     // Merge all batches into one for the detector.
-    // (In practice there is typically one batch from DuckDB, but we handle multi.)
     let schema = batches[0].schema();
     let merged_batch =
         duckdb::arrow::compute::concat_batches(&schema, &batches).expect("concat batches");
@@ -207,8 +163,7 @@ async fn test_end_to_end_pipeline() {
         "second detect with same data: expected 0 deletes"
     );
 
-    // Step 11: Insert more data with window_id=2 (change notional for FX),
-    // then re-aggregate.
+    // Step 11: Insert more data with window_id=2 (change notional for FX).
     let sql_w2 = "INSERT INTO slices \
          (trade_id, book, desk, instrument, instrument_type, currency, \
           quantity, price, notional, side, trade_time, _window_id) VALUES \
@@ -218,14 +173,14 @@ async fn test_end_to_end_pipeline() {
         .expect("insert window 2 trades");
 
     let batches2 = db
-        .query_arrow(&config.aggregation.sql)
+        .query_arrow(agg_sql)
         .await
         .expect("query_arrow window 2");
 
     let merged2 = duckdb::arrow::compute::concat_batches(&batches2[0].schema(), &batches2)
         .expect("concat batches window 2");
 
-    // Step 12: Third detect() → FX group changed (more data added), so >= 1 upsert.
+    // Step 12: Third detect() → FX group changed, so >= 1 upsert.
     let (upserts3, _deletes3) = detector.detect(&merged2);
     assert!(
         upserts3.num_rows() > 0,
@@ -244,9 +199,9 @@ async fn test_config_hash_lifecycle() {
         .await
         .expect("hash should match original config");
 
-    // Step 3: Modify config's aggregation SQL.
+    // Step 3: Modify config's publish SQL.
     let mut modified = config.clone();
-    modified.aggregation.sql = "SELECT book, COUNT(*) AS cnt FROM slices GROUP BY book".into();
+    modified.aggregation.publish.sql = "SELECT book, COUNT(*) AS cnt FROM slices GROUP BY book".into();
 
     // Step 4: Verify hash fails with ConfigHashMismatch.
     let result = persistence::verify_config_hash(&db, &modified).await;

@@ -2,70 +2,84 @@
 name: trading_positions
 description: Real-time position aggregation by book
 
-source:
-  type: kafka
-  brokers: ["localhost:9092"]
-  topic: "trades.executed"
-  group_id: "hydrocube-positions"
-  format: json
+tables:
+  - name: trades
+    mode: append
+    schema:
+      columns:
+        - { name: trade_id,        type: VARCHAR    }
+        - { name: book,            type: VARCHAR    }
+        - { name: desk,            type: VARCHAR    }
+        - { name: instrument,      type: VARCHAR    }
+        - { name: instrument_type, type: VARCHAR    }
+        - { name: currency,        type: VARCHAR    }
+        - { name: quantity,        type: DOUBLE     }
+        - { name: price,           type: DOUBLE     }
+        - { name: notional,        type: DOUBLE     }
+        - { name: side,            type: VARCHAR    }
+        - { name: trade_time,      type: TIMESTAMP  }
 
-schema:
-  columns:
-    - name: trade_id
-      type: VARCHAR
-    - name: book
-      type: VARCHAR
-    - name: desk
-      type: VARCHAR
-    - name: instrument
-      type: VARCHAR
-    - name: instrument_type
-      type: VARCHAR
-    - name: currency
-      type: VARCHAR
-    - name: quantity
-      type: DOUBLE
-    - name: price
-      type: DOUBLE
-    - name: notional
-      type: DOUBLE
-    - name: side
-      type: VARCHAR
-    - name: trade_time
-      type: TIMESTAMP
+sources:
+  - type: kafka
+    table: trades
+    brokers: ["localhost:9092"]
+    topic: "trades.executed"
+    group_id: "hydrocube-positions"
+    format: json
 
 aggregation:
-  sql: |
-    SELECT
-      book,
-      desk,
-      instrument_type,
-      currency,
-      SUM(notional) AS total_notional,
-      SUM(CASE WHEN side = 'BUY' THEN quantity ELSE -quantity END) AS net_quantity,
-      COUNT(*) AS trade_count,
-      AVG(price) AS avg_price,
-      MAX(trade_time) AS max_trade_time
-    FROM slices
-    GROUP BY book, desk, instrument_type, currency
+  key_columns: [book, desk, instrument_type, currency]
+
+  compaction:
+    interval: "1m"
+    sql: |
+      -- Copy the pending window range into `consolidated` so the publish
+      -- query only needs to scan recent trades.
+      -- {pending.trades} expands to:
+      --   (SELECT * FROM trades WHERE _window_id > {cutoff} AND _window_id <= {new_cutoff})
+      INSERT INTO consolidated SELECT * FROM {pending.trades}
+
+  publish:
+    sql: |
+      SELECT
+        book,
+        desk,
+        instrument_type,
+        currency,
+        SUM(notional)                                                AS total_notional,
+        SUM(CASE WHEN side = 'BUY' THEN quantity ELSE -quantity END) AS net_quantity,
+        COUNT(*)                                                      AS trade_count,
+        SUM(notional) / NULLIF(SUM(quantity), 0)                     AS avg_price,
+        MAX(trade_time)                                               AS max_trade_time
+      FROM (
+        -- Historical rows already compacted into `consolidated`
+        SELECT book, desk, instrument_type, currency,
+               notional, side, quantity, trade_time
+        FROM consolidated
+
+        UNION ALL
+
+        -- Recent rows not yet compacted (since the last compaction cutoff)
+        SELECT book, desk, instrument_type, currency,
+               notional, side, quantity, trade_time
+        FROM trades
+        WHERE _window_id > (
+          SELECT COALESCE(MAX(compaction_cutoff), 0) FROM _cube_metadata
+        )
+      ) all_trades
+      GROUP BY book, desk, instrument_type, currency
 
 window:
   interval_ms: 1000
 
-compaction:
-  interval_windows: 60
-
 retention:
-  duration: 6d
-  parquet_path: "/data/hydrocube/slices/"
+  raw:
+    duration: 6d
+    parquet_path: "/data/hydrocube/slices/"
 
 persistence:
   enabled: true
   path: "/data/hydrocube/positions.db"
   flush_interval: 10
-
-ui:
-  enabled: true
-  port: 8080
 
 log_level: info

@@ -1,4 +1,6 @@
 // src/ingest/mod.rs
+pub mod file;
+pub mod nats;
 pub mod parser;
 
 #[cfg(feature = "kafka")]
@@ -7,7 +9,19 @@ pub mod kafka;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
 
+use crate::config::DataFormat;
 use crate::error::HcResult;
+
+/// A raw message from any ingest source.
+#[derive(Debug, Clone)]
+pub struct RawMessage {
+    pub table: String,       // target table name
+    pub bytes: Vec<u8>,      // raw wire bytes
+    pub format: DataFormat,  // parsing hint
+}
+
+pub type IngestSender   = mpsc::Sender<RawMessage>;
+pub type IngestReceiver = mpsc::Receiver<RawMessage>;
 
 /// Ingest source abstraction. Implementors stream raw message bytes to the
 /// provided channel and respect the shutdown signal.

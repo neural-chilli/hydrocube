@@ -10,8 +10,9 @@ use crate::config::CubeConfig;
 use crate::db_manager::{arrow::compute::concat_batches, DbManager};
 use crate::error::HcError;
 use crate::publish::{batch_to_base64_arrow, DeltaEvent};
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
+use crate::config::TableMode;
 use axum::response::{IntoResponse, Json};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -32,12 +33,16 @@ pub struct AppState {
     pub snapshot_sql: String,
     pub start_time: Instant,
     pub broadcast_tx: broadcast::Sender<DeltaEvent>,
+    /// Optional channel for HTTP-based ingest. `None` when the engine is not
+    /// running (e.g. validate-only mode) or the channel is not wired up.
+    pub ingest_tx: Option<crate::ingest::IngestSender>,
 }
 
 // ---------------------------------------------------------------------------
 // Helper: convert HcError to an HTTP 500 response
 // ---------------------------------------------------------------------------
 
+#[derive(Debug)]
 pub struct ApiError(HcError);
 
 impl IntoResponse for ApiError {
@@ -85,6 +90,8 @@ pub struct StatusResponse {
     pub window_id: u64,
     pub compaction_cutoff: u64,
     pub sse_client_count: usize,
+    pub table_count: usize,
+    pub source_count: usize,
 }
 
 pub async fn status_handler(State(state): State<Arc<AppState>>) -> ApiResult<Json<StatusResponse>> {
@@ -100,6 +107,8 @@ pub async fn status_handler(State(state): State<Arc<AppState>>) -> ApiResult<Jso
         window_id,
         compaction_cutoff: cutoff,
         sse_client_count: sse_clients,
+        table_count: state.config.tables.len(),
+        source_count: state.config.sources.len(),
     }))
 }
 
@@ -124,8 +133,10 @@ pub struct ColumnInfo {
 pub async fn schema_handler(State(state): State<Arc<AppState>>) -> ApiResult<Json<SchemaResponse>> {
     let columns = state
         .config
-        .schema
-        .columns
+        .tables
+        .first()
+        .map(|t| t.schema.columns.as_slice())
+        .unwrap_or(&[])
         .iter()
         .map(|c| ColumnInfo {
             name: c.name.clone(),
@@ -136,7 +147,7 @@ pub async fn schema_handler(State(state): State<Arc<AppState>>) -> ApiResult<Jso
     Ok(Json(SchemaResponse {
         cube_name: state.config.name.clone(),
         columns,
-        aggregation_sql: state.config.aggregation.sql.clone(),
+        aggregation_sql: state.config.aggregation.publish.sql.clone(),
     }))
 }
 
@@ -198,4 +209,104 @@ pub async fn query_handler(
         row_count,
         arrow_ipc_b64,
     }))
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/drillthrough/{table}
+// ---------------------------------------------------------------------------
+
+pub async fn drillthrough_handler(
+    State(state): State<Arc<AppState>>,
+    Path(table_name): Path<String>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<serde_json::Value>)> {
+    // Validate table exists and is append-mode
+    let table_cfg = match state.config.table(&table_name) {
+        Some(t) => t,
+        None => {
+            let body = json!({ "error": format!("table '{}' not found", table_name) });
+            return Err((StatusCode::BAD_REQUEST, Json(body)));
+        }
+    };
+
+    if table_cfg.mode != TableMode::Append {
+        let body = json!({ "error": format!("table '{}' is not an append-mode table", table_name) });
+        return Err((StatusCode::BAD_REQUEST, Json(body)));
+    }
+
+    let max_rows = state.config.drillthrough.max_rows;
+
+    // Count rows first to enforce limit
+    let count_sql = format!("SELECT COUNT(*) AS cnt FROM {}", table_name);
+    let count_rows = state.db.query_json(&count_sql, vec![]).await
+        .map_err(|e| {
+            let body = json!({ "error": e.to_string() });
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(body))
+        })?;
+
+    let row_count = count_rows.first()
+        .and_then(|r| r.get("cnt"))
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as usize;
+
+    if row_count > max_rows {
+        let body = json!({
+            "error": format!("result set too large: {} rows exceeds max_rows={}", row_count, max_rows)
+        });
+        return Err((StatusCode::PAYLOAD_TOO_LARGE, Json(body)));
+    }
+
+    // Fetch rows as Arrow IPC
+    let fetch_sql = format!("SELECT * FROM {}", table_name);
+    let batches = state.db.query_arrow(fetch_sql).await
+        .map_err(|e| {
+            let body = json!({ "error": e.to_string() });
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(body))
+        })?;
+
+    let (actual_rows, b64) = concat_and_serialize(&batches)
+        .map_err(|e| {
+            let body = json!({ "error": e.0.to_string() });
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(body))
+        })?;
+
+    Ok(Json(json!({
+        "table": table_name,
+        "row_count": actual_rows,
+        "data": b64,
+    })))
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/reaggregate
+// ---------------------------------------------------------------------------
+
+pub async fn reaggregate_handler(
+    State(state): State<Arc<AppState>>,
+) -> ApiResult<Json<serde_json::Value>> {
+    // Re-run the startup hook SQL if declared
+    if let Some(startup) = &state.config.aggregation.startup {
+        if let Some(sql) = &startup.sql {
+            use crate::hooks::placeholder::PlaceholderContext;
+            use crate::aggregation::window::compaction_cutoff;
+            let mut ctx = PlaceholderContext::new(
+                compaction_cutoff(),
+                None,
+                chrono::Utc::now(),
+                None,
+            );
+            ctx.table_modes = state.config.tables.iter()
+                .map(|t| (t.name.clone(), t.mode.clone()))
+                .collect();
+            let expanded = ctx.expand(sql);
+            // Execute each semicolon-separated statement
+            for stmt in expanded.split(';') {
+                let trimmed = stmt.trim();
+                if !trimmed.is_empty() {
+                    state.db.execute(trimmed, vec![]).await?;
+                }
+            }
+        }
+    }
+
+    Ok(Json(json!({ "status": "ok", "message": "re-aggregation complete" })))
 }

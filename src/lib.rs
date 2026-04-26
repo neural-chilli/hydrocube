@@ -2,6 +2,7 @@
 // Public library surface — used by integration tests.
 
 pub mod aggregation;
+pub mod tables;
 pub mod auth;
 pub mod cli;
 pub mod compaction;
@@ -17,3 +18,5 @@ pub mod retention;
 pub mod shutdown;
 pub mod transform;
 pub mod web;
+pub mod hooks;
+pub mod identity;

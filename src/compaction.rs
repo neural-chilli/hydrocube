@@ -1,9 +1,8 @@
 // src/compaction.rs
 //
-// CompactionThread periodically exports old slices to Parquet files,
-// deletes them from DuckDB, and updates the compaction cutoff.
-//
-// All DuckDB access goes through DbManager to allow hot-path interleaving.
+// CompactionThread periodically runs the user-defined compaction SQL (if
+// configured) and/or exports old slices to Parquet, then advances the
+// compaction cutoff.  All DuckDB access goes through DbManager.
 
 use tokio::sync::watch;
 use tokio::time::{interval, Duration};
@@ -13,6 +12,7 @@ use crate::aggregation::window::{compaction_cutoff, set_compaction_cutoff, WINDO
 use crate::config::CubeConfig;
 use crate::db_manager::DbManager;
 use crate::error::HcResult;
+use crate::hooks::runner::HookRunner;
 use crate::persistence;
 use crate::retention::RetentionManager;
 
@@ -29,7 +29,12 @@ pub struct CompactionThread {
 impl CompactionThread {
     /// Create a new CompactionThread from a DbManager and CubeConfig.
     pub fn new(db: DbManager, config: CubeConfig) -> Self {
-        let interval_windows = config.compaction.interval_windows;
+        // In the new config, compaction interval comes from aggregation.compaction.interval.
+        // Default to 60 windows if not configured.
+        let interval_windows = config.aggregation.compaction.as_ref()
+            .and_then(|c| crate::config::parse_duration_str(&c.interval).ok())
+            .map(|secs| (secs * 1000 / config.window.interval_ms.max(1)).max(1))
+            .unwrap_or(60);
         Self {
             db,
             config,
@@ -88,14 +93,16 @@ impl CompactionThread {
         let current_window = WINDOW_ID.load(Ordering::Acquire);
 
         // Calculate how many windows the configured retention period spans.
-        // This is the minimum look-back we must preserve in the slices table
-        // so that the full aggregation query always covers the full retention window.
-        let retention_windows: u64 = match self.config.retention.parse_duration_seconds() {
-            Ok(secs) => {
+        // In the new config, raw retention is under retention.raw.duration.
+        let raw_retention_secs = self.config.retention.as_ref()
+            .and_then(|r| r.raw.as_ref())
+            .and_then(|r| r.parse_duration_seconds().ok());
+        let retention_windows: u64 = match raw_retention_secs {
+            Some(secs) => {
                 let interval_secs = (self.config.window.interval_ms as f64 / 1000.0).max(0.001);
                 (secs as f64 / interval_secs).ceil() as u64
             }
-            Err(_) => {
+            None => {
                 warn!(target: "compaction", "could not parse retention duration; defaulting to 86400 windows");
                 86_400
             }
@@ -133,18 +140,37 @@ impl CompactionThread {
         );
 
         // Step 4: Export to Parquet (best-effort).
-        let parquet_path = &self.config.retention.parquet_path;
-        if let Err(e) = RetentionManager::export_to_parquet(&self.db, parquet_path, cutoff).await {
-            warn!(
-                target: "compaction",
-                "parquet export failed (continuing with delete): {}",
-                e
-            );
+        let parquet_path_opt = self.config.retention.as_ref()
+            .and_then(|r| r.raw.as_ref())
+            .and_then(|r| r.parquet_path.clone());
+        if let Some(ref parquet_path) = parquet_path_opt {
+            if let Err(e) = RetentionManager::export_to_parquet(&self.db, parquet_path, cutoff).await {
+                warn!(
+                    target: "compaction",
+                    "parquet export failed (continuing with delete): {}",
+                    e
+                );
+            }
         }
 
-        // Step 5: Delete old slices from DuckDB.
-        let delete_sql = format!("DELETE FROM slices WHERE _window_id <= {}", cutoff);
-        self.db.execute(&delete_sql, vec![]).await?;
+        // Step 5: Run user-defined compaction SQL (new model) or fall back to
+        // deleting from the legacy `slices` table.
+        let has_user_sql = self.config.aggregation.compaction.as_ref()
+            .and_then(|c| c.sql.as_ref())
+            .is_some();
+
+        if has_user_sql {
+            // New model: run the user's compaction SQL with {pending.table},
+            // {cutoff}, and {new_cutoff} tokens expanded.
+            let runner = HookRunner::new(self.config.clone(), self.db.clone());
+            if let Err(e) = runner.run_compaction(cutoff).await {
+                warn!(target: "compaction", "compaction SQL error: {}", e);
+            }
+        } else {
+            // Legacy model: delete rows from the `slices` table.
+            let delete_sql = format!("DELETE FROM slices WHERE _window_id <= {}", cutoff);
+            self.db.execute(&delete_sql, vec![]).await?;
+        }
 
         // Step 6: Advance the in-memory atomic.
         set_compaction_cutoff(cutoff);
@@ -159,18 +185,19 @@ impl CompactionThread {
         );
 
         // Step 8: Prune old Parquet directories (best-effort).
-        match self.config.retention.parse_duration_seconds() {
-            Ok(retention_seconds) => {
-                if let Err(e) = RetentionManager::prune(parquet_path, retention_seconds) {
-                    warn!(target: "compaction", "retention prune failed: {}", e);
+        if let Some(ref parquet_path) = parquet_path_opt {
+            match raw_retention_secs {
+                Some(retention_seconds) => {
+                    if let Err(e) = RetentionManager::prune(parquet_path, retention_seconds) {
+                        warn!(target: "compaction", "retention prune failed: {}", e);
+                    }
                 }
-            }
-            Err(e) => {
-                warn!(
-                    target: "compaction",
-                    "could not parse retention duration, skipping prune: {}",
-                    e
-                );
+                None => {
+                    warn!(
+                        target: "compaction",
+                        "could not parse retention duration, skipping prune"
+                    );
+                }
             }
         }
 
