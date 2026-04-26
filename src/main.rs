@@ -229,7 +229,7 @@ async fn main() {
         let broadcast_tx_web = broadcast_tx.clone();
 
         tokio::spawn(async move {
-            if let Err(e) = start_server(db_web, config_web, broadcast_tx_web, port).await {
+            if let Err(e) = start_server(db_web, config_web, broadcast_tx_web, port, None).await {
                 error!("Web server error: {}", e);
             }
         });
