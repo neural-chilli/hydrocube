@@ -440,7 +440,13 @@ async function loadSnapshot() {
     const resp = await fetch('/api/snapshot');
     if (!resp.ok) return false;
     const data = await resp.json();
-    if (!data.arrow_ipc_b64 || data.row_count === 0) return false;
+    if (!data.arrow_ipc_b64 || data.row_count === 0) {
+      // Server reachable but no data yet — update overlay text so user knows
+      // we're connected and waiting for the first trades to arrive.
+      const textEl = pspLoading.querySelector('div:last-child');
+      if (textEl) textEl.textContent = 'Waiting for first data…';
+      return false;
+    }
 
     const buf = b64ToBuffer(data.arrow_ipc_b64);
 

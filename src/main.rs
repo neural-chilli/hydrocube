@@ -184,16 +184,37 @@ async fn main() {
     // -------------------------------------------------------------------------
     let (raw_tx, raw_rx) = tokio::sync::mpsc::channel::<hydrocube::ingest::RawMessage>(10_000);
 
-    // Spawn Kafka ingest (only when kafka feature enabled and source is kafka)
-    // Kafka ingest is handled per-source in the new config model.
-    // This will be wired up in a later task; skipping for now.
+    // Spawn one KafkaSource task per kafka-type source in the config.
     #[cfg(feature = "kafka")]
     {
-        // Future: iterate config.sources and start KafkaSource for each kafka source.
-        let _ = &raw_tx; // suppress unused warning
+        use hydrocube::config::SourceType;
+        use hydrocube::ingest::kafka::KafkaSource;
+        use hydrocube::ingest::IngestSource;
+
+        for source_cfg in config.sources.iter().filter(|s| s.source_type == SourceType::Kafka) {
+            match KafkaSource::new(source_cfg) {
+                Ok(source) => {
+                    let tx = raw_tx.clone();
+                    let shutdown = shutdown_rx.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) = source.run(tx, shutdown).await {
+                            error!("Kafka source error: {}", e);
+                        }
+                    });
+                    info!(
+                        topic = source_cfg.topic.as_deref().unwrap_or("?"),
+                        table = %source_cfg.table,
+                        "Kafka source started"
+                    );
+                }
+                Err(e) => {
+                    error!("Failed to create Kafka source: {}", e);
+                }
+            }
+        }
     }
 
-    // Drop our copy of raw_tx so channel closes when ingest stops
+    // Drop our copy of raw_tx — channel closes when the last source task stops.
     drop(raw_tx);
 
     // Spawn hot path engine

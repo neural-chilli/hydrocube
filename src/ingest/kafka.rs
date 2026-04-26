@@ -8,22 +8,26 @@ use rdkafka::consumer::{Consumer, StreamConsumer};
 #[cfg(feature = "kafka")]
 use rdkafka::Message;
 #[cfg(feature = "kafka")]
-use tokio::sync::mpsc;
-#[cfg(feature = "kafka")]
 use tokio::sync::watch;
 #[cfg(feature = "kafka")]
 use tracing::{debug, error, info, warn};
 
 #[cfg(feature = "kafka")]
-use crate::config::SourceConfig;
+use crate::config::{DataFormat, SourceConfig};
 #[cfg(feature = "kafka")]
 use crate::error::{HcError, HcResult};
+#[cfg(feature = "kafka")]
+use crate::ingest::{IngestSender, RawMessage};
 
 #[cfg(feature = "kafka")]
 pub struct KafkaSource {
     brokers: String,
     topic: String,
     group_id: String,
+    /// Target table name — forwarded on every RawMessage.
+    table: String,
+    /// Wire format (JSON / CSV / Arrow).
+    format: DataFormat,
 }
 
 #[cfg(feature = "kafka")]
@@ -50,6 +54,8 @@ impl KafkaSource {
             brokers,
             topic,
             group_id,
+            table: config.table.clone(),
+            format: config.format.clone(),
         })
     }
 }
@@ -59,7 +65,7 @@ impl KafkaSource {
 impl super::IngestSource for KafkaSource {
     async fn run(
         &self,
-        tx: mpsc::Sender<Vec<u8>>,
+        tx: IngestSender,
         mut shutdown: watch::Receiver<bool>,
     ) -> HcResult<()> {
         let consumer: StreamConsumer = ClientConfig::new()
@@ -74,7 +80,7 @@ impl super::IngestSource for KafkaSource {
             .subscribe(&[&self.topic])
             .map_err(|e| HcError::Ingest(format!("failed to subscribe to topic: {}", e)))?;
 
-        info!(target: "hydrocube::ingest::kafka", topic = %self.topic, "Kafka consumer started");
+        info!(target: "hydrocube::ingest::kafka", topic = %self.topic, table = %self.table, "Kafka consumer started");
 
         let mut stream = consumer.stream();
 
@@ -99,7 +105,12 @@ impl super::IngestSource for KafkaSource {
                                     bytes = payload.len(),
                                     "received message"
                                 );
-                                if tx.send(payload.to_vec()).await.is_err() {
+                                let msg = RawMessage {
+                                    table: self.table.clone(),
+                                    bytes: payload.to_vec(),
+                                    format: self.format.clone(),
+                                };
+                                if tx.send(msg).await.is_err() {
                                     warn!(target: "hydrocube::ingest::kafka", "ingest channel closed, stopping consumer");
                                     break;
                                 }
@@ -122,7 +133,7 @@ impl super::IngestSource for KafkaSource {
     }
 
     async fn commit(&self) -> HcResult<()> {
-        // TODO: implement manual offset commit when auto-commit is disabled
+        // librdkafka handles auto-commit; manual commit not needed in this mode.
         Ok(())
     }
 }
