@@ -1,6 +1,41 @@
 use hydrocube::db_manager::DbManager;
 use hydrocube::hooks::runner::HookRunner;
 
+#[tokio::test]
+async fn test_hook_runner_resolves_static_file_paths() {
+    let db = hydrocube::db_manager::DbManager::open_in_memory().unwrap();
+    let cfg: hydrocube::config::CubeConfig = serde_yaml::from_str(r#"
+name: t
+tables:
+  - name: greeks
+    mode: reference
+    schema:
+      columns:
+        - { name: symbol, type: VARCHAR }
+sources:
+  - name: sod_greeks
+    type: file
+    table: greeks
+    format: parquet
+    load: startup
+    path: /data/2026/04/greeks.parquet
+window: { interval_ms: 1000 }
+persistence: { enabled: false, path: ":memory:", flush_interval: 10 }
+aggregation:
+  key_columns: [symbol]
+  publish:
+    sql: "SELECT symbol FROM greeks"
+"#).unwrap();
+
+    let mut runner = HookRunner::new(cfg, db);
+    runner.resolve_file_paths().unwrap();
+
+    assert_eq!(
+        runner.resolved_paths.get("sod_greeks"),
+        Some(&vec!["/data/2026/04/greeks.parquet".to_owned()])
+    );
+}
+
 fn make_cfg_with_startup(startup_sql: &str) -> hydrocube::config::CubeConfig {
     serde_yaml::from_str(&format!(r#"
 name: test
