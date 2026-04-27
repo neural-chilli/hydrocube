@@ -50,6 +50,8 @@ fn make_state(ingest_tx: Option<hydrocube::ingest::IngestSender>) -> Arc<AppStat
         start_time: Instant::now(),
         broadcast_tx,
         ingest_tx,
+        peer_registry: None,
+        http_client: reqwest::Client::new(),
     })
 }
 

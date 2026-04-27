@@ -10,6 +10,7 @@ use crate::config::CubeConfig;
 use crate::config::TableMode;
 use crate::db_manager::{arrow::compute::concat_batches, DbManager};
 use crate::error::HcError;
+use crate::peers::{PeerRecord, PeerRegistry, PeerStatus};
 use crate::publish::{batch_to_base64_arrow, DeltaEvent};
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -36,6 +37,10 @@ pub struct AppState {
     /// Optional channel for HTTP-based ingest. `None` when the engine is not
     /// running (e.g. validate-only mode) or the channel is not wired up.
     pub ingest_tx: Option<crate::ingest::IngestSender>,
+    /// Optional peer registry for multi-cube peer discovery.
+    pub peer_registry: Option<Arc<PeerRegistry>>,
+    /// HTTP client for forwarding peer registrations.
+    pub http_client: reqwest::Client,
 }
 
 // ---------------------------------------------------------------------------
@@ -309,4 +314,93 @@ pub async fn reaggregate_handler(
     Ok(Json(
         json!({ "status": "ok", "message": "re-aggregation complete" }),
     ))
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/peers
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize)]
+pub struct GetPeersResponse {
+    #[serde(rename = "self")]
+    pub self_info: PeerRecord,
+    pub peers: Vec<PeerRecord>,
+}
+
+pub async fn get_peers_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    match &state.peer_registry {
+        None => {
+            let self_info = PeerRecord {
+                name: state.config.name.clone(),
+                url: String::new(),
+                description: state.config.description.clone().unwrap_or_default(),
+                status: PeerStatus::Online,
+            };
+            Json(GetPeersResponse { self_info, peers: vec![] }).into_response()
+        }
+        Some(registry) => {
+            let self_info = registry.own_info();
+            let peers = registry.list();
+            Json(GetPeersResponse { self_info, peers }).into_response()
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/peers/register
+// ---------------------------------------------------------------------------
+
+#[derive(Deserialize)]
+pub struct RegisterPeerRequest {
+    pub name: String,
+    pub url: String,
+    pub description: String,
+    #[serde(default)]
+    pub forwarded: bool,
+}
+
+#[derive(Serialize)]
+struct ForwardBody<'a> {
+    name: &'a str,
+    url: &'a str,
+    description: &'a str,
+    forwarded: bool,
+}
+
+pub async fn register_peer_handler(
+    State(state): State<Arc<AppState>>,
+    Json(body): Json<RegisterPeerRequest>,
+) -> impl IntoResponse {
+    let registry = match &state.peer_registry {
+        Some(r) => r.clone(),
+        None => return Json(Vec::<PeerRecord>::new()).into_response(),
+    };
+
+    registry.upsert(PeerRecord {
+        name: body.name.clone(),
+        url: body.url.clone(),
+        description: body.description.clone(),
+        status: PeerStatus::Online,
+    });
+
+    if !body.forwarded {
+        let forward_targets = registry.peer_urls_except(&body.url);
+        if !forward_targets.is_empty() {
+            let client = state.http_client.clone();
+            let name = body.name.clone();
+            let url = body.url.clone();
+            let description = body.description.clone();
+            tokio::spawn(async move {
+                for target_base in forward_targets {
+                    let forward_url = format!("{}/api/peers/register", target_base.trim_end_matches('/'));
+                    let fw = ForwardBody { name: &name, url: &url, description: &description, forwarded: true };
+                    if let Err(e) = client.post(&forward_url).json(&fw).send().await {
+                        tracing::warn!(target: "hydrocube::peers", "Failed to forward registration to {}: {}", target_base, e);
+                    }
+                }
+            });
+        }
+    }
+
+    Json(registry.list()).into_response()
 }

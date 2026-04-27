@@ -22,8 +22,8 @@ use crate::ingest::IngestSender;
 use crate::publish::DeltaEvent;
 
 use super::api::{
-    drillthrough_handler, query_handler, reaggregate_handler, schema_handler, snapshot_handler,
-    status_handler, AppState,
+    drillthrough_handler, get_peers_handler, query_handler, reaggregate_handler, register_peer_handler,
+    schema_handler, snapshot_handler, status_handler, AppState,
 };
 use super::assets::static_handler;
 use super::http_ingest::http_ingest_handler;
@@ -110,6 +110,8 @@ pub async fn start_server(
         start_time: std::time::Instant::now(),
         broadcast_tx,
         ingest_tx,
+        peer_registry: None,
+        http_client: reqwest::Client::new(),
     });
 
     let router = Router::new()
@@ -120,6 +122,8 @@ pub async fn start_server(
         .route("/api/query", post(query_handler))
         .route("/api/drillthrough/{table}", get(drillthrough_handler))
         .route("/api/reaggregate", post(reaggregate_handler))
+        .route("/api/peers", get(get_peers_handler))
+        .route("/api/peers/register", post(register_peer_handler))
         .route("/ingest/{table}", post(http_ingest_handler))
         // SSE stream
         .route("/api/stream", get(sse_handler))

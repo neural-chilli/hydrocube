@@ -15,6 +15,8 @@ fn make_state(config: hydrocube::config::CubeConfig, db: DbManager) -> Arc<AppSt
         start_time: Instant::now(),
         broadcast_tx,
         ingest_tx: None,
+        peer_registry: None,
+        http_client: reqwest::Client::new(),
     })
 }
 
@@ -118,4 +120,128 @@ async fn test_status_includes_table_and_source_counts() {
     let axum::response::Json(resp) = result.unwrap();
     assert_eq!(resp.table_count, 2);
     assert_eq!(resp.source_count, 0);
+}
+
+// ---------------------------------------------------------------------------
+// Peer API tests
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_get_peers_no_registry_returns_self_with_empty_peers() {
+    use hydrocube::web::api::get_peers_handler;
+    let db = DbManager::open_in_memory().unwrap();
+    let cfg = trades_config();
+    let state = make_state(cfg, db);
+    // peer_registry is None — handler should return self_info from config and empty peers
+    let result = get_peers_handler(State(state.clone())).await;
+    let response = axum::response::IntoResponse::into_response(result);
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+    let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+    assert_eq!(body["peers"].as_array().unwrap().len(), 0);
+    assert_eq!(body["self"]["name"].as_str().unwrap(), &state.config.name);
+}
+
+#[tokio::test]
+async fn test_register_peer_no_registry_returns_empty_list() {
+    use hydrocube::web::api::register_peer_handler;
+    use axum::Json;
+    let db = DbManager::open_in_memory().unwrap();
+    let state = make_state(trades_config(), db);
+    let body = hydrocube::web::api::RegisterPeerRequest {
+        name: "peer1".to_owned(),
+        url: "http://peer1:8080".to_owned(),
+        description: "a peer".to_owned(),
+        forwarded: false,
+    };
+    let result = register_peer_handler(State(state), Json(body)).await;
+    let response = axum::response::IntoResponse::into_response(result);
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+    let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let peers: Vec<serde_json::Value> = serde_json::from_slice(&body_bytes).unwrap();
+    assert!(peers.is_empty());
+}
+
+#[tokio::test]
+async fn test_get_peers_with_registry_returns_peer_list() {
+    use hydrocube::peers::{PeerRecord, PeerRegistry, PeerStatus};
+    use hydrocube::web::api::get_peers_handler;
+    let db = DbManager::open_in_memory().unwrap();
+    let cfg = trades_config();
+    let (broadcast_tx, _) = broadcast::channel::<DeltaEvent>(16);
+    let own = PeerRecord {
+        name: cfg.name.clone(),
+        url: "http://self:8080".to_owned(),
+        description: String::new(),
+        status: PeerStatus::Online,
+    };
+    let registry = PeerRegistry::new(own);
+    registry.upsert(PeerRecord {
+        name: "peer-a".to_owned(),
+        url: "http://peer-a:8080".to_owned(),
+        description: "Peer A".to_owned(),
+        status: PeerStatus::Online,
+    });
+    let state = Arc::new(AppState {
+        db,
+        snapshot_sql: "SELECT 1".to_owned(),
+        config: cfg,
+        start_time: Instant::now(),
+        broadcast_tx,
+        ingest_tx: None,
+        peer_registry: Some(Arc::new(registry)),
+        http_client: reqwest::Client::new(),
+    });
+    let result = get_peers_handler(State(state)).await;
+    let response = axum::response::IntoResponse::into_response(result);
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+    let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+    assert_eq!(body["peers"].as_array().unwrap().len(), 1);
+    assert_eq!(body["peers"][0]["name"].as_str().unwrap(), "peer-a");
+}
+
+#[tokio::test]
+async fn test_register_peer_adds_to_registry() {
+    use hydrocube::peers::{PeerRecord, PeerRegistry, PeerStatus};
+    use hydrocube::web::api::register_peer_handler;
+    use axum::Json;
+    let db = DbManager::open_in_memory().unwrap();
+    let cfg = trades_config();
+    let (broadcast_tx, _) = broadcast::channel::<DeltaEvent>(16);
+    let own = PeerRecord {
+        name: cfg.name.clone(),
+        url: "http://self:8080".to_owned(),
+        description: String::new(),
+        status: PeerStatus::Online,
+    };
+    let registry = Arc::new(PeerRegistry::new(own));
+    let state = Arc::new(AppState {
+        db,
+        snapshot_sql: "SELECT 1".to_owned(),
+        config: cfg,
+        start_time: Instant::now(),
+        broadcast_tx,
+        ingest_tx: None,
+        peer_registry: Some(registry.clone()),
+        http_client: reqwest::Client::new(),
+    });
+    let body = hydrocube::web::api::RegisterPeerRequest {
+        name: "peer-b".to_owned(),
+        url: "http://peer-b:9090".to_owned(),
+        description: "Peer B".to_owned(),
+        forwarded: true,
+    };
+    let result = register_peer_handler(State(state), Json(body)).await;
+    let response = axum::response::IntoResponse::into_response(result);
+    assert_eq!(response.status(), axum::http::StatusCode::OK);
+    let listed = registry.list();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].name, "peer-b");
 }
