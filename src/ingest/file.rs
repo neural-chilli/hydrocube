@@ -24,10 +24,7 @@ pub async fn load_file_into_table(
     format: DataFormat,
 ) -> HcResult<()> {
     let reader_expr = file_reader_expr(path, format);
-    let sql = format!(
-        "INSERT INTO {} SELECT * FROM {}",
-        table_name, reader_expr
-    );
+    let sql = format!("INSERT INTO {} SELECT * FROM {}", table_name, reader_expr);
     db.execute(&sql, vec![]).await?;
     Ok(())
 }
@@ -36,8 +33,8 @@ pub async fn load_file_into_table(
 fn file_reader_expr(path: &str, format: DataFormat) -> String {
     match format {
         DataFormat::Parquet => format!("read_parquet('{path}')"),
-        DataFormat::Csv     => format!("read_csv_auto('{path}')"),
-        DataFormat::Json    => format!("read_json_auto('{path}')"),
+        DataFormat::Csv => format!("read_csv_auto('{path}')"),
+        DataFormat::Json => format!("read_json_auto('{path}')"),
         DataFormat::JsonLines => {
             // DuckDB reads JSON Lines via read_json_auto with format='newline_delimited'
             format!("read_json_auto('{path}', format='newline_delimited')")
@@ -66,14 +63,17 @@ pub fn resolve_paths_with_lua(lua_code: &str, function_name: &str) -> HcResult<V
         .exec()
         .map_err(|e| HcError::Transform(format!("Lua load error: {e}")))?;
 
-    let func: mlua::Function = lua.globals().get(function_name)
-        .map_err(|e| HcError::Transform(format!("Lua function '{function_name}' not found: {e}")))?;
+    let func: mlua::Function = lua.globals().get(function_name).map_err(|e| {
+        HcError::Transform(format!("Lua function '{function_name}' not found: {e}"))
+    })?;
 
-    let result: LuaValue = func.call(())
+    let result: LuaValue = func
+        .call(())
         .map_err(|e| HcError::Transform(format!("Lua call error: {e}")))?;
 
     match result {
-        LuaValue::String(s) => Ok(vec![s.to_str()
+        LuaValue::String(s) => Ok(vec![s
+            .to_str()
             .map_err(|e| HcError::Transform(e.to_string()))?
             .to_owned()]),
         LuaValue::Table(t) => {

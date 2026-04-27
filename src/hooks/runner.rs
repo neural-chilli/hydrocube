@@ -29,7 +29,9 @@ impl HookRunner {
         }
     }
 
-    pub fn db(&self) -> &DbManager { &self.db }
+    pub fn db(&self) -> &DbManager {
+        &self.db
+    }
 
     fn make_ctx(&self, new_cutoff: Option<u64>) -> PlaceholderContext {
         let mut ctx = PlaceholderContext::new(
@@ -39,7 +41,10 @@ impl HookRunner {
             self.period_start,
         );
         ctx.resolved_paths = self.resolved_paths.clone();
-        ctx.table_modes = self.config.tables.iter()
+        ctx.table_modes = self
+            .config
+            .tables
+            .iter()
             .map(|t| (t.name.clone(), t.mode.clone()))
             .collect();
         ctx
@@ -47,8 +52,12 @@ impl HookRunner {
 
     /// Run the startup hook SQL (if declared). Errors are fatal.
     pub async fn run_startup(&self) -> HcResult<()> {
-        let Some(startup) = &self.config.aggregation.startup else { return Ok(()); };
-        let Some(sql) = &startup.sql else { return Ok(()); };
+        let Some(startup) = &self.config.aggregation.startup else {
+            return Ok(());
+        };
+        let Some(sql) = &startup.sql else {
+            return Ok(());
+        };
         let ctx = self.make_ctx(None);
         let expanded = ctx.expand(sql);
         self.exec_statements(&expanded).await
@@ -62,8 +71,12 @@ impl HookRunner {
 
     /// Run compaction hook SQL with a specific new_cutoff value.
     pub async fn run_compaction(&self, new_cutoff: u64) -> HcResult<()> {
-        let Some(hook) = &self.config.aggregation.compaction else { return Ok(()); };
-        let Some(sql) = &hook.sql else { return Ok(()); };
+        let Some(hook) = &self.config.aggregation.compaction else {
+            return Ok(());
+        };
+        let Some(sql) = &hook.sql else {
+            return Ok(());
+        };
         let ctx = self.make_ctx(Some(new_cutoff));
         let expanded = ctx.expand(sql);
         self.exec_statements(&expanded).await
@@ -83,8 +96,12 @@ impl HookRunner {
 
     /// Run reset hook SQL. Called after reset sources are loaded.
     pub async fn run_reset(&self) -> HcResult<()> {
-        let Some(reset) = &self.config.aggregation.reset else { return Ok(()); };
-        let Some(sql) = &reset.sql else { return Ok(()); };
+        let Some(reset) = &self.config.aggregation.reset else {
+            return Ok(());
+        };
+        let Some(sql) = &reset.sql else {
+            return Ok(());
+        };
         let ctx = self.make_ctx(None);
         let expanded = ctx.expand(sql);
         self.exec_statements(&expanded).await
@@ -92,7 +109,12 @@ impl HookRunner {
 
     /// Run a housekeeping job SQL. Errors are logged but non-fatal at the call site.
     pub async fn run_housekeeping(&self, job_name: &str) -> HcResult<()> {
-        let jobs = self.config.aggregation.housekeeping.as_deref().unwrap_or(&[]);
+        let jobs = self
+            .config
+            .aggregation
+            .housekeeping
+            .as_deref()
+            .unwrap_or(&[]);
         let Some(job) = jobs.iter().find(|j| j.name == job_name) else {
             return Ok(());
         };
@@ -116,11 +138,15 @@ impl HookRunner {
 
             let paths = if let Some(resolver) = &src.path_resolver {
                 // Run Lua to get paths
-                let lua_code = resolver.inline.as_deref()
+                let lua_code = resolver
+                    .inline
+                    .as_deref()
                     .or(resolver.script.as_deref())
-                    .ok_or_else(|| HcError::Config(format!(
-                        "source '{name}': path_resolver needs inline or script"
-                    )))?;
+                    .ok_or_else(|| {
+                        HcError::Config(format!(
+                            "source '{name}': path_resolver needs inline or script"
+                        ))
+                    })?;
                 resolve_paths_with_lua(lua_code, &resolver.function)?
             } else if let Some(path) = &src.path {
                 vec![path.clone()]

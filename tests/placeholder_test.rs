@@ -1,6 +1,6 @@
-use hydrocube::hooks::placeholder::PlaceholderContext;
-use hydrocube::config::TableMode;
 use chrono::{TimeZone, Utc};
+use hydrocube::config::TableMode;
+use hydrocube::hooks::placeholder::PlaceholderContext;
 
 fn ctx_at(y: i32, m: u32, d: u32) -> PlaceholderContext {
     let now = Utc.with_ymd_and_hms(y, m, d, 12, 0, 0).unwrap();
@@ -10,8 +10,10 @@ fn ctx_at(y: i32, m: u32, d: u32) -> PlaceholderContext {
 fn ctx_with_tables() -> PlaceholderContext {
     let now = Utc::now();
     let mut ctx = PlaceholderContext::new(5, Some(15), now, None);
-    ctx.table_modes.insert("trades".to_owned(), TableMode::Append);
-    ctx.table_modes.insert("market_data".to_owned(), TableMode::Replace);
+    ctx.table_modes
+        .insert("trades".to_owned(), TableMode::Append);
+    ctx.table_modes
+        .insert("market_data".to_owned(), TableMode::Replace);
     ctx
 }
 
@@ -59,7 +61,10 @@ fn test_append_table_token_expands_with_where_clause() {
     let ctx = ctx_with_tables();
     let sql = "SELECT * FROM {trades}";
     let out = ctx.expand(sql);
-    assert_eq!(out, "SELECT * FROM (SELECT * FROM trades WHERE _window_id > 5)");
+    assert_eq!(
+        out,
+        "SELECT * FROM (SELECT * FROM trades WHERE _window_id > 5)"
+    );
 }
 
 #[test]
@@ -75,14 +80,20 @@ fn test_pending_table_token_expands() {
     let ctx = ctx_with_tables();
     let sql = "FROM {pending.trades}";
     let out = ctx.expand(sql);
-    assert_eq!(out, "FROM (SELECT * FROM trades WHERE _window_id > 5 AND _window_id <= 15)");
+    assert_eq!(
+        out,
+        "FROM (SELECT * FROM trades WHERE _window_id > 5 AND _window_id <= 15)"
+    );
 }
 
 #[test]
 fn test_path_token_single_path() {
     let now = Utc::now();
     let mut ctx = PlaceholderContext::new(0, None, now, None);
-    ctx.resolved_paths.insert("sod_data".to_owned(), vec!["/data/2026/sod.parquet".to_owned()]);
+    ctx.resolved_paths.insert(
+        "sod_data".to_owned(),
+        vec!["/data/2026/sod.parquet".to_owned()],
+    );
     let out = ctx.expand("read_parquet({path.sod_data})");
     assert_eq!(out, "read_parquet('/data/2026/sod.parquet')");
 }
@@ -91,10 +102,10 @@ fn test_path_token_single_path() {
 fn test_path_token_multiple_paths() {
     let now = Utc::now();
     let mut ctx = PlaceholderContext::new(0, None, now, None);
-    ctx.resolved_paths.insert("files".to_owned(), vec![
-        "/data/a.parquet".to_owned(),
-        "/data/b.parquet".to_owned(),
-    ]);
+    ctx.resolved_paths.insert(
+        "files".to_owned(),
+        vec!["/data/a.parquet".to_owned(), "/data/b.parquet".to_owned()],
+    );
     let out = ctx.expand("read_parquet({path.files})");
     assert_eq!(out, "read_parquet(['/data/a.parquet', '/data/b.parquet'])");
 }

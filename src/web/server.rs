@@ -21,7 +21,10 @@ use crate::error::{HcError, HcResult};
 use crate::ingest::IngestSender;
 use crate::publish::DeltaEvent;
 
-use super::api::{drillthrough_handler, query_handler, reaggregate_handler, schema_handler, snapshot_handler, status_handler, AppState};
+use super::api::{
+    drillthrough_handler, query_handler, reaggregate_handler, schema_handler, snapshot_handler,
+    status_handler, AppState,
+};
 use super::assets::static_handler;
 use super::http_ingest::http_ingest_handler;
 

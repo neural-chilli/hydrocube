@@ -200,7 +200,11 @@ async fn main() {
         use hydrocube::ingest::kafka::KafkaSource;
         use hydrocube::ingest::IngestSource;
 
-        for source_cfg in config.sources.iter().filter(|s| s.source_type == SourceType::Kafka) {
+        for source_cfg in config
+            .sources
+            .iter()
+            .filter(|s| s.source_type == SourceType::Kafka)
+        {
             match KafkaSource::new(source_cfg) {
                 Ok(source) => {
                     let tx = raw_tx.clone();

@@ -19,11 +19,7 @@ impl NatsSource {
         Self { config }
     }
 
-    pub async fn run(
-        &self,
-        tx: IngestSender,
-        shutdown: watch::Receiver<bool>,
-    ) -> HcResult<()> {
+    pub async fn run(&self, tx: IngestSender, shutdown: watch::Receiver<bool>) -> HcResult<()> {
         let url = self
             .config
             .url

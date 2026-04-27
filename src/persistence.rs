@@ -239,14 +239,13 @@ pub async fn rebuild(db: &DbManager, config: &CubeConfig) -> HcResult<()> {
     .await?;
 
     // Best-effort Parquet import.
-    let parquet_dir = config.retention.as_ref()
+    let parquet_dir = config
+        .retention
+        .as_ref()
         .and_then(|r| r.raw.as_ref())
         .and_then(|r| r.parquet_path.clone())
         .unwrap_or_else(|| "/tmp/hydrocube_parquet".to_string());
-    let parquet_glob = format!(
-        "{}/*.parquet",
-        parquet_dir.trim_end_matches('/')
-    );
+    let parquet_glob = format!("{}/*.parquet", parquet_dir.trim_end_matches('/'));
     let import_sql = format!(
         "INSERT INTO slices SELECT *, 0 AS _window_id FROM read_parquet('{}', union_by_name=true)",
         parquet_glob
@@ -273,7 +272,9 @@ pub async fn rebuild(db: &DbManager, config: &CubeConfig) -> HcResult<()> {
 fn schema_column_ddl(config: &CubeConfig) -> String {
     // Use the first append-mode table's schema for backwards compatibility.
     // In later tasks this will be per-table DDL.
-    let columns = config.tables.first()
+    let columns = config
+        .tables
+        .first()
         .map(|t| t.schema.columns.as_slice())
         .unwrap_or(&[]);
     columns

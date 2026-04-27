@@ -15,12 +15,15 @@ function transform(batch, ctx)
     return out
 end
 "#;
-    let rows = vec![
-        vec![json!("T001"), json!("EMEA"), json!(1000.0)],
+    let rows = vec![vec![json!("T001"), json!("EMEA"), json!(1000.0)]];
+    let col_names = vec![
+        "trade_id".to_owned(),
+        "book".to_owned(),
+        "notional".to_owned(),
     ];
-    let col_names = vec!["trade_id".to_owned(), "book".to_owned(), "notional".to_owned()];
 
-    let (out_rows, marks) = run_lua_with_identity_ctx(lua_code, "transform", &rows, &col_names, &cache).unwrap();
+    let (out_rows, marks) =
+        run_lua_with_identity_ctx(lua_code, "transform", &rows, &col_names, &cache).unwrap();
     assert_eq!(out_rows.len(), 1);
     // No marks yet (didn't call ctx.mark_seen)
     assert!(marks.is_empty());
@@ -43,9 +46,14 @@ end
         vec![json!("T001"), json!("EMEA"), json!(1000.0)],
         vec![json!("T002"), json!("APAC"), json!(2000.0)],
     ];
-    let col_names = vec!["trade_id".to_owned(), "book".to_owned(), "notional".to_owned()];
+    let col_names = vec![
+        "trade_id".to_owned(),
+        "book".to_owned(),
+        "notional".to_owned(),
+    ];
 
-    let (_out_rows, marks) = run_lua_with_identity_ctx(lua_code, "transform", &rows, &col_names, &cache).unwrap();
+    let (_out_rows, marks) =
+        run_lua_with_identity_ctx(lua_code, "transform", &rows, &col_names, &cache).unwrap();
     assert_eq!(marks.len(), 2);
     assert!(marks.contains(&"T001".to_owned()));
     assert!(marks.contains(&"T002".to_owned()));

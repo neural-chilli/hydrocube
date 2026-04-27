@@ -18,7 +18,8 @@ use tokio::sync::{broadcast, mpsc};
 use tower::ServiceExt;
 
 fn test_config() -> CubeConfig {
-    serde_yaml::from_str(r#"
+    serde_yaml::from_str(
+        r#"
 name: test
 tables:
   - name: trades
@@ -34,7 +35,9 @@ aggregation:
   key_columns: [book]
   publish:
     sql: "SELECT book, SUM(notional) AS total FROM trades GROUP BY book"
-"#).unwrap()
+"#,
+    )
+    .unwrap()
 }
 
 fn make_state(ingest_tx: Option<hydrocube::ingest::IngestSender>) -> Arc<AppState> {
@@ -75,9 +78,14 @@ async fn test_http_ingest_unknown_table_returns_404() {
     let response = router.oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 
-    let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
-    assert!(json["error"].as_str().unwrap().contains("nonexistent_table"));
+    assert!(json["error"]
+        .as_str()
+        .unwrap()
+        .contains("nonexistent_table"));
 }
 
 // ---------------------------------------------------------------------------
@@ -99,7 +107,9 @@ async fn test_http_ingest_no_channel_returns_503() {
     let response = router.oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
 
-    let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
     assert!(json["error"].as_str().unwrap().contains("not available"));
 }
@@ -124,7 +134,9 @@ async fn test_http_ingest_single_object_accepted() {
     let response = router.oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
-    let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
     assert_eq!(json["accepted"].as_u64().unwrap(), 1);
 
@@ -147,13 +159,17 @@ async fn test_http_ingest_json_array_accepted() {
         .method("POST")
         .uri("/ingest/trades")
         .header("content-type", "application/json")
-        .body(Body::from(r#"[{"book":"A","notional":100.0},{"book":"B","notional":200.0}]"#))
+        .body(Body::from(
+            r#"[{"book":"A","notional":100.0},{"book":"B","notional":200.0}]"#,
+        ))
         .unwrap();
 
     let response = router.oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::OK);
 
-    let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body_bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .unwrap();
     let json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
     assert_eq!(json["accepted"].as_u64().unwrap(), 2);
 

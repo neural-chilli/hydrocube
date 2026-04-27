@@ -9,8 +9,8 @@
 
 #[allow(unused_imports)]
 use hydrocube::config::{
-    AggregationConfig, ColumnDef, CubeConfig, PersistenceConfig,
-    PublishHookConfig, SchemaConfig, TableConfig, TableMode, WindowConfig,
+    AggregationConfig, ColumnDef, CubeConfig, PersistenceConfig, PublishHookConfig, SchemaConfig,
+    TableConfig, TableMode, WindowConfig,
 };
 use hydrocube::db_manager::DbManager;
 use hydrocube::delta::DeltaDetector;
@@ -24,7 +24,8 @@ use hydrocube::publish::batch_to_base64_arrow;
 
 /// Build a CubeConfig using the new multi-table config shape.
 fn trading_config() -> CubeConfig {
-    serde_yaml::from_str(r#"
+    serde_yaml::from_str(
+        r#"
 name: trading_positions
 description: Real-time position aggregation by book
 tables:
@@ -62,7 +63,9 @@ aggregation:
              MAX(trade_time) AS max_trade_time
       FROM slices
       GROUP BY book, desk, instrument_type, currency
-"#).unwrap()
+"#,
+    )
+    .unwrap()
 }
 
 /// Open and initialise a fresh in-memory database.
@@ -105,10 +108,7 @@ async fn test_end_to_end_pipeline() {
 
     // Step 5: Run aggregation SQL via query_arrow.
     let agg_sql = &config.aggregation.publish.sql;
-    let batches = db
-        .query_arrow(agg_sql)
-        .await
-        .expect("query_arrow failed");
+    let batches = db.query_arrow(agg_sql).await.expect("query_arrow failed");
 
     // Step 6: Assert > 0 rows.
     let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
@@ -172,10 +172,7 @@ async fn test_end_to_end_pipeline() {
         .await
         .expect("insert window 2 trades");
 
-    let batches2 = db
-        .query_arrow(agg_sql)
-        .await
-        .expect("query_arrow window 2");
+    let batches2 = db.query_arrow(agg_sql).await.expect("query_arrow window 2");
 
     let merged2 = duckdb::arrow::compute::concat_batches(&batches2[0].schema(), &batches2)
         .expect("concat batches window 2");
@@ -201,7 +198,8 @@ async fn test_config_hash_lifecycle() {
 
     // Step 3: Modify config's publish SQL.
     let mut modified = config.clone();
-    modified.aggregation.publish.sql = "SELECT book, COUNT(*) AS cnt FROM slices GROUP BY book".into();
+    modified.aggregation.publish.sql =
+        "SELECT book, COUNT(*) AS cnt FROM slices GROUP BY book".into();
 
     // Step 4: Verify hash fails with ConfigHashMismatch.
     let result = persistence::verify_config_hash(&db, &modified).await;

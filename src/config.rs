@@ -32,7 +32,9 @@ pub struct CubeConfig {
     pub log_level: String,
 }
 
-fn default_log_level() -> String { "info".to_string() }
+fn default_log_level() -> String {
+    "info".to_string()
+}
 
 // ── Tables ───────────────────────────────────────────────────────────────────
 
@@ -116,23 +118,41 @@ pub struct SourceConfig {
     pub identity_key: Option<String>,
 }
 
-fn default_format() -> DataFormat { DataFormat::Json }
+fn default_format() -> DataFormat {
+    DataFormat::Json
+}
 
 #[derive(Debug, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "lowercase")]
-pub enum SourceType { Kafka, Nats, Http, File }
+pub enum SourceType {
+    Kafka,
+    Nats,
+    Http,
+    File,
+}
 
 #[derive(Debug, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "lowercase")]
-pub enum DataFormat { Json, Csv, Parquet, JsonLines }
+pub enum DataFormat {
+    Json,
+    Csv,
+    Parquet,
+    JsonLines,
+}
 
 #[derive(Debug, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "lowercase")]
-pub enum LoadTiming { Startup, Reset }
+pub enum LoadTiming {
+    Startup,
+    Reset,
+}
 
 #[derive(Debug, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "lowercase")]
-pub enum NatsMode { Core, Jetstream }
+pub enum NatsMode {
+    Core,
+    Jetstream,
+}
 
 // ── Lua blocks ───────────────────────────────────────────────────────────────
 
@@ -198,7 +218,7 @@ pub struct HookConfig {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct CompactionHookConfig {
-    pub interval: String,   // e.g. "60s", "5m", "1h"
+    pub interval: String, // e.g. "60s", "5m", "1h"
     #[serde(default)]
     pub lua: Option<LuaBlock>,
     #[serde(default)]
@@ -276,7 +296,9 @@ pub struct AggregateRetentionConfig {
     pub duration: String,
 }
 
-fn default_forever() -> String { "forever".to_string() }
+fn default_forever() -> String {
+    "forever".to_string()
+}
 
 // ── Drillthrough / delta ──────────────────────────────────────────────────────
 
@@ -286,10 +308,14 @@ pub struct DrillThroughConfig {
     pub max_rows: usize,
 }
 
-fn default_max_rows() -> usize { 50_000 }
+fn default_max_rows() -> usize {
+    50_000
+}
 
 impl Default for DrillThroughConfig {
-    fn default() -> Self { Self { max_rows: 50_000 } }
+    fn default() -> Self {
+        Self { max_rows: 50_000 }
+    }
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -299,7 +325,9 @@ pub struct DeltaConfig {
 }
 
 impl Default for DeltaConfig {
-    fn default() -> Self { Self { epsilon: 0.0 } }
+    fn default() -> Self {
+        Self { epsilon: 0.0 }
+    }
 }
 
 // ── NATS publish output / auth ────────────────────────────────────────────────
@@ -342,7 +370,12 @@ impl CubeConfig {
         }
         hasher.update(self.aggregation.key_columns.join(",").as_bytes());
         hasher.update(self.aggregation.publish.sql.as_bytes());
-        if let Some(s) = self.aggregation.startup.as_ref().and_then(|h| h.sql.as_ref()) {
+        if let Some(s) = self
+            .aggregation
+            .startup
+            .as_ref()
+            .and_then(|h| h.sql.as_ref())
+        {
             hasher.update(s.as_bytes());
         }
         format!("{:x}", hasher.finalize())
@@ -386,7 +419,8 @@ impl CubeConfig {
         for table in &self.tables {
             if !seen_names.insert(&table.name) {
                 return Err(HcError::Config(format!(
-                    "duplicate table name: '{}'", table.name
+                    "duplicate table name: '{}'",
+                    table.name
                 )));
             }
         }
@@ -415,9 +449,12 @@ impl CubeConfig {
             }
         }
         if let Some(c) = &self.aggregation.compaction {
-            c.interval_seconds().map_err(|_| HcError::Config(format!(
-                "aggregation.compaction.interval is invalid: '{}'", c.interval
-            )))?;
+            c.interval_seconds().map_err(|_| {
+                HcError::Config(format!(
+                    "aggregation.compaction.interval is invalid: '{}'",
+                    c.interval
+                ))
+            })?;
         }
         Ok(())
     }
@@ -437,22 +474,23 @@ impl RawRetentionConfig {
 
 pub fn parse_duration_str(s: &str) -> HcResult<u64> {
     if let Some(days) = s.strip_suffix('d') {
-        let d: u64 = days.parse().map_err(|_| {
-            HcError::Config(format!("invalid duration: {s}"))
-        })?;
+        let d: u64 = days
+            .parse()
+            .map_err(|_| HcError::Config(format!("invalid duration: {s}")))?;
         Ok(d * 86_400)
     } else if let Some(hours) = s.strip_suffix('h') {
-        let h: u64 = hours.parse().map_err(|_| {
-            HcError::Config(format!("invalid duration: {s}"))
-        })?;
+        let h: u64 = hours
+            .parse()
+            .map_err(|_| HcError::Config(format!("invalid duration: {s}")))?;
         Ok(h * 3_600)
     } else if let Some(mins) = s.strip_suffix('m') {
-        let m: u64 = mins.parse().map_err(|_| {
-            HcError::Config(format!("invalid duration: {s}"))
-        })?;
+        let m: u64 = mins
+            .parse()
+            .map_err(|_| HcError::Config(format!("invalid duration: {s}")))?;
         Ok(m * 60)
     } else if let Some(secs) = s.strip_suffix('s') {
-        secs.parse().map_err(|_| HcError::Config(format!("invalid duration: {s}")))
+        secs.parse()
+            .map_err(|_| HcError::Config(format!("invalid duration: {s}")))
     } else {
         Err(HcError::Config(format!(
             "duration must end with d/h/m/s, got: {s}"

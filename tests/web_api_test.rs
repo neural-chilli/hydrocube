@@ -1,9 +1,9 @@
-use std::sync::Arc;
-use std::time::Instant;
 use axum::extract::{Path, State};
 use hydrocube::db_manager::DbManager;
-use hydrocube::web::api::{AppState, drillthrough_handler, reaggregate_handler, status_handler};
 use hydrocube::publish::DeltaEvent;
+use hydrocube::web::api::{drillthrough_handler, reaggregate_handler, status_handler, AppState};
+use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::broadcast;
 
 fn make_state(config: hydrocube::config::CubeConfig, db: DbManager) -> Arc<AppState> {
@@ -19,7 +19,8 @@ fn make_state(config: hydrocube::config::CubeConfig, db: DbManager) -> Arc<AppSt
 }
 
 fn trades_config() -> hydrocube::config::CubeConfig {
-    serde_yaml::from_str(r#"
+    serde_yaml::from_str(
+        r#"
 name: t
 tables:
   - name: trades
@@ -42,7 +43,9 @@ aggregation:
   key_columns: [id]
   publish:
     sql: "SELECT id, SUM(val) FROM {trades} GROUP BY id"
-"#).unwrap()
+"#,
+    )
+    .unwrap()
 }
 
 #[tokio::test]
@@ -59,7 +62,12 @@ async fn test_drillthrough_unknown_table_returns_400() {
 #[tokio::test]
 async fn test_drillthrough_replace_table_returns_400() {
     let db = DbManager::open_in_memory().unwrap();
-    db.execute("CREATE TABLE md (id VARCHAR, px DOUBLE, PRIMARY KEY (id))", vec![]).await.unwrap();
+    db.execute(
+        "CREATE TABLE md (id VARCHAR, px DOUBLE, PRIMARY KEY (id))",
+        vec![],
+    )
+    .await
+    .unwrap();
     let state = make_state(trades_config(), db);
     let result = drillthrough_handler(State(state), Path("md".to_owned())).await;
     assert!(result.is_err());
@@ -74,8 +82,15 @@ async fn test_drillthrough_returns_rows() {
     db.execute(
         "CREATE TABLE trades (id VARCHAR, val DOUBLE, _window_id UBIGINT)",
         vec![],
-    ).await.unwrap();
-    db.execute("INSERT INTO trades VALUES ('A', 1.0, 1), ('B', 2.0, 1)", vec![]).await.unwrap();
+    )
+    .await
+    .unwrap();
+    db.execute(
+        "INSERT INTO trades VALUES ('A', 1.0, 1), ('B', 2.0, 1)",
+        vec![],
+    )
+    .await
+    .unwrap();
 
     let state = make_state(trades_config(), db);
     let result = drillthrough_handler(State(state), Path("trades".to_owned())).await;

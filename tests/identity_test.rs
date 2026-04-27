@@ -53,13 +53,19 @@ async fn test_populate_from_duckdb() {
     db.execute(
         "CREATE TABLE trades (trade_id VARCHAR, book VARCHAR, _window_id UBIGINT)",
         vec![],
-    ).await.unwrap();
+    )
+    .await
+    .unwrap();
     db.execute(
         "INSERT INTO trades VALUES ('T001', 'EMEA', 1), ('T002', 'APAC', 1)",
         vec![],
-    ).await.unwrap();
+    )
+    .await
+    .unwrap();
 
-    let keys = populate_identity_cache_from_db(&db, "trades", "trade_id").await.unwrap();
+    let keys = populate_identity_cache_from_db(&db, "trades", "trade_id")
+        .await
+        .unwrap();
     assert_eq!(keys.len(), 2);
     assert!(keys.contains(&"T001".to_owned()));
     assert!(keys.contains(&"T002".to_owned()));

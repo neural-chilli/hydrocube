@@ -62,8 +62,8 @@ impl TransformPipeline {
                         ));
                     };
                     let _ = inline; // may be used in future
-                    // Use batch mode when the function name contains "batch",
-                    // otherwise fall back to per-message mode.
+                                    // Use batch mode when the function name contains "batch",
+                                    // otherwise fall back to per-message mode.
                     if function.contains("batch") {
                         transform.execute_batch(current, &col_names)?
                     } else {

@@ -31,7 +31,10 @@ impl CompactionThread {
     pub fn new(db: DbManager, config: CubeConfig) -> Self {
         // In the new config, compaction interval comes from aggregation.compaction.interval.
         // Default to 60 windows if not configured.
-        let interval_windows = config.aggregation.compaction.as_ref()
+        let interval_windows = config
+            .aggregation
+            .compaction
+            .as_ref()
             .and_then(|c| crate::config::parse_duration_str(&c.interval).ok())
             .map(|secs| (secs * 1000 / config.window.interval_ms.max(1)).max(1))
             .unwrap_or(60);
@@ -94,7 +97,10 @@ impl CompactionThread {
 
         // Calculate how many windows the configured retention period spans.
         // In the new config, raw retention is under retention.raw.duration.
-        let raw_retention_secs = self.config.retention.as_ref()
+        let raw_retention_secs = self
+            .config
+            .retention
+            .as_ref()
             .and_then(|r| r.raw.as_ref())
             .and_then(|r| r.parse_duration_seconds().ok());
         let retention_windows: u64 = match raw_retention_secs {
@@ -140,11 +146,16 @@ impl CompactionThread {
         );
 
         // Step 4: Export to Parquet (best-effort).
-        let parquet_path_opt = self.config.retention.as_ref()
+        let parquet_path_opt = self
+            .config
+            .retention
+            .as_ref()
             .and_then(|r| r.raw.as_ref())
             .and_then(|r| r.parquet_path.clone());
         if let Some(ref parquet_path) = parquet_path_opt {
-            if let Err(e) = RetentionManager::export_to_parquet(&self.db, parquet_path, cutoff).await {
+            if let Err(e) =
+                RetentionManager::export_to_parquet(&self.db, parquet_path, cutoff).await
+            {
                 warn!(
                     target: "compaction",
                     "parquet export failed (continuing with delete): {}",
@@ -155,7 +166,11 @@ impl CompactionThread {
 
         // Step 5: Run user-defined compaction SQL (new model) or fall back to
         // deleting from the legacy `slices` table.
-        let has_user_sql = self.config.aggregation.compaction.as_ref()
+        let has_user_sql = self
+            .config
+            .aggregation
+            .compaction
+            .as_ref()
             .and_then(|c| c.sql.as_ref())
             .is_some();
 

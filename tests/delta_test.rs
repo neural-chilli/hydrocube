@@ -244,12 +244,20 @@ fn test_epsilon_suppresses_small_float_change() {
     // Second window — tiny change within epsilon (0.0005 < 0.001).
     let batch2 = make_batch(schema.clone(), "EMEA", 1000.0005);
     let (ups2, _) = detector.detect(&batch2);
-    assert_eq!(ups2.num_rows(), 0, "change within epsilon should be suppressed");
+    assert_eq!(
+        ups2.num_rows(),
+        0,
+        "change within epsilon should be suppressed"
+    );
 
     // Third window — change beyond epsilon (0.005 > 0.001).
     let batch3 = make_batch(schema.clone(), "EMEA", 1000.005);
     let (ups3, _) = detector.detect(&batch3);
-    assert_eq!(ups3.num_rows(), 1, "change beyond epsilon should be detected");
+    assert_eq!(
+        ups3.num_rows(),
+        1,
+        "change beyond epsilon should be detected"
+    );
 }
 
 #[test]
@@ -321,5 +329,9 @@ fn test_clear_resets_previous_state() {
 
     // Same batch — should be detected as NEW (previous cleared).
     let (ups, _) = detector.detect(&b1);
-    assert_eq!(ups.num_rows(), 1, "after clear(), all rows are treated as new");
+    assert_eq!(
+        ups.num_rows(),
+        1,
+        "after clear(), all rows are treated as new"
+    );
 }

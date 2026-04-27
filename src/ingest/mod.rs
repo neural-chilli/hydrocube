@@ -15,12 +15,12 @@ use crate::error::HcResult;
 /// A raw message from any ingest source.
 #[derive(Debug, Clone)]
 pub struct RawMessage {
-    pub table: String,       // target table name
-    pub bytes: Vec<u8>,      // raw wire bytes
-    pub format: DataFormat,  // parsing hint
+    pub table: String,      // target table name
+    pub bytes: Vec<u8>,     // raw wire bytes
+    pub format: DataFormat, // parsing hint
 }
 
-pub type IngestSender   = mpsc::Sender<RawMessage>;
+pub type IngestSender = mpsc::Sender<RawMessage>;
 pub type IngestReceiver = mpsc::Receiver<RawMessage>;
 
 /// Ingest source abstraction. Implementors stream raw messages to the
@@ -31,8 +31,7 @@ pub trait IngestSource: Send + Sync {
     ///
     /// Returns when the shutdown watch fires `true` or an unrecoverable error
     /// occurs.
-    async fn run(&self, tx: IngestSender, shutdown: watch::Receiver<bool>)
-        -> HcResult<()>;
+    async fn run(&self, tx: IngestSender, shutdown: watch::Receiver<bool>) -> HcResult<()>;
 
     /// Commit offsets / acknowledge the current position.
     async fn commit(&self) -> HcResult<()>;

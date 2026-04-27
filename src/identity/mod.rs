@@ -16,7 +16,9 @@ pub struct IdentityCache {
 }
 
 impl IdentityCache {
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     /// Returns true if the key has been seen before.
     pub fn seen(&self, key: &str) -> bool {
@@ -38,8 +40,12 @@ impl IdentityCache {
         self.seen.iter()
     }
 
-    pub fn len(&self) -> usize { self.seen.len() }
-    pub fn is_empty(&self) -> bool { self.seen.is_empty() }
+    pub fn len(&self) -> usize {
+        self.seen.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.seen.is_empty()
+    }
 }
 
 /// Identity caches for all tables, keyed by table name.
@@ -49,7 +55,9 @@ pub struct MultiTableIdentityCache {
 }
 
 impl MultiTableIdentityCache {
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     pub fn seen(&self, table: &str, key: &str) -> bool {
         self.tables.get(table).map(|c| c.seen(key)).unwrap_or(false)

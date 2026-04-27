@@ -1,8 +1,8 @@
 // tests/persistence_test.rs
 
 use hydrocube::config::{
-    AggregationConfig, ColumnDef, CubeConfig, DeltaConfig, DrillThroughConfig,
-    PersistenceConfig, PublishHookConfig, SchemaConfig, TableConfig, TableMode, WindowConfig,
+    AggregationConfig, ColumnDef, CubeConfig, DeltaConfig, DrillThroughConfig, PersistenceConfig,
+    PublishHookConfig, SchemaConfig, TableConfig, TableMode, WindowConfig,
 };
 use hydrocube::db_manager::DbManager;
 use hydrocube::error::HcError;
@@ -24,15 +24,28 @@ fn test_config() -> CubeConfig {
             key_columns: None,
             schema: SchemaConfig {
                 columns: vec![
-                    ColumnDef { name: "trade_id".into(), col_type: "VARCHAR".into() },
-                    ColumnDef { name: "quantity".into(), col_type: "DOUBLE".into() },
-                    ColumnDef { name: "price".into(),    col_type: "DOUBLE".into() },
+                    ColumnDef {
+                        name: "trade_id".into(),
+                        col_type: "VARCHAR".into(),
+                    },
+                    ColumnDef {
+                        name: "quantity".into(),
+                        col_type: "DOUBLE".into(),
+                    },
+                    ColumnDef {
+                        name: "price".into(),
+                        col_type: "DOUBLE".into(),
+                    },
                 ],
             },
         }],
         sources: vec![],
         window: WindowConfig { interval_ms: 1000 },
-        persistence: PersistenceConfig { enabled: true, path: ":memory:".into(), flush_interval: 10 },
+        persistence: PersistenceConfig {
+            enabled: true,
+            path: ":memory:".into(),
+            flush_interval: 10,
+        },
         retention: None,
         drillthrough: DrillThroughConfig::default(),
         delta: DeltaConfig::default(),
@@ -292,8 +305,14 @@ async fn test_init_tables_creates_append_table_with_window_id() {
         key_columns: None,
         schema: SchemaConfig {
             columns: vec![
-                ColumnDef { name: "id".into(),  col_type: "VARCHAR".into() },
-                ColumnDef { name: "val".into(), col_type: "DOUBLE".into() },
+                ColumnDef {
+                    name: "id".into(),
+                    col_type: "VARCHAR".into(),
+                },
+                ColumnDef {
+                    name: "val".into(),
+                    col_type: "DOUBLE".into(),
+                },
             ],
         },
     }];
@@ -302,7 +321,9 @@ async fn test_init_tables_creates_append_table_with_window_id() {
     db.execute(
         "INSERT INTO events (id, val, _window_id) VALUES ('a', 1.0, 1)",
         vec![],
-    ).await.unwrap();
+    )
+    .await
+    .unwrap();
     let rows = db.query_json("SELECT * FROM events", vec![]).await.unwrap();
     assert_eq!(rows.len(), 1);
 }
@@ -318,16 +339,27 @@ async fn test_init_tables_creates_replace_table_with_primary_key() {
         key_columns: Some(vec!["id".into()]),
         schema: SchemaConfig {
             columns: vec![
-                ColumnDef { name: "id".into(),  col_type: "VARCHAR".into() },
-                ColumnDef { name: "val".into(), col_type: "DOUBLE".into() },
+                ColumnDef {
+                    name: "id".into(),
+                    col_type: "VARCHAR".into(),
+                },
+                ColumnDef {
+                    name: "val".into(),
+                    col_type: "DOUBLE".into(),
+                },
             ],
         },
     }];
     persistence::init_tables(&db, &tables).await.unwrap();
     // Duplicate key insert should either error or replace — DuckDB uses INSERT OR REPLACE behaviour
-    db.execute("INSERT INTO md (id, val) VALUES ('x', 1.0)", vec![]).await.unwrap();
+    db.execute("INSERT INTO md (id, val) VALUES ('x', 1.0)", vec![])
+        .await
+        .unwrap();
     // Verify the table exists and has the right shape
-    let rows = db.query_json("SELECT val FROM md WHERE id = 'x'", vec![]).await.unwrap();
+    let rows = db
+        .query_json("SELECT val FROM md WHERE id = 'x'", vec![])
+        .await
+        .unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0]["val"].as_f64().unwrap(), 1.0);
 }
@@ -343,17 +375,30 @@ async fn test_init_tables_creates_reference_table_no_window_id() {
         key_columns: None,
         schema: SchemaConfig {
             columns: vec![
-                ColumnDef { name: "id".into(),  col_type: "VARCHAR".into() },
-                ColumnDef { name: "val".into(), col_type: "DOUBLE".into() },
+                ColumnDef {
+                    name: "id".into(),
+                    col_type: "VARCHAR".into(),
+                },
+                ColumnDef {
+                    name: "val".into(),
+                    col_type: "DOUBLE".into(),
+                },
             ],
         },
     }];
     persistence::init_tables(&db, &tables).await.unwrap();
-    db.execute("INSERT INTO ref_data (id, val) VALUES ('a', 1.0)", vec![]).await.unwrap();
+    db.execute("INSERT INTO ref_data (id, val) VALUES ('a', 1.0)", vec![])
+        .await
+        .unwrap();
     // Confirm no _window_id column (inserting it should fail)
-    let result = db.execute(
-        "INSERT INTO ref_data (id, val, _window_id) VALUES ('b', 2.0, 99)",
-        vec![],
-    ).await;
-    assert!(result.is_err(), "reference table should not have _window_id");
+    let result = db
+        .execute(
+            "INSERT INTO ref_data (id, val, _window_id) VALUES ('b', 2.0, 99)",
+            vec![],
+        )
+        .await;
+    assert!(
+        result.is_err(),
+        "reference table should not have _window_id"
+    );
 }

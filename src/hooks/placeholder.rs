@@ -1,6 +1,6 @@
 // src/hooks/placeholder.rs
-use std::collections::HashMap;
 use chrono::{DateTime, Utc};
+use std::collections::HashMap;
 
 use crate::config::TableMode;
 
@@ -43,13 +43,13 @@ impl PlaceholderContext {
 
         // ── Date components ───────────────────────────────────────────────────
         let yyyy = self.now.format("%Y").to_string();
-        let mm   = self.now.format("%m").to_string();
-        let dd   = self.now.format("%d").to_string();
+        let mm = self.now.format("%m").to_string();
+        let dd = self.now.format("%d").to_string();
         out = out.replace("{YYYY}", &yyyy);
-        out = out.replace("{MM}",   &mm);
-        out = out.replace("{DD}",   &dd);
+        out = out.replace("{MM}", &mm);
+        out = out.replace("{DD}", &dd);
         out = out.replace("{YYYYMMDD}", &format!("{yyyy}{mm}{dd}"));
-        out = out.replace("{date}",     &format!("{yyyy}-{mm}-{dd}"));
+        out = out.replace("{date}", &format!("{yyyy}-{mm}-{dd}"));
 
         // ── Timestamps ────────────────────────────────────────────────────────
         out = out.replace("{now}", &self.now.to_rfc3339());
@@ -69,7 +69,8 @@ impl PlaceholderContext {
             let expanded = if paths.len() == 1 {
                 format!("'{}'", paths[0])
             } else {
-                let quoted = paths.iter()
+                let quoted = paths
+                    .iter()
                     .map(|p| format!("'{p}'"))
                     .collect::<Vec<_>>()
                     .join(", ");
@@ -88,7 +89,8 @@ impl PlaceholderContext {
         let cutoff_str = self.compaction_cutoff.to_string();
         let new_cutoff_str = self.new_cutoff.map(|n| n.to_string()).unwrap_or_default();
 
-        let table_names: Vec<(String, TableMode)> = self.table_modes
+        let table_names: Vec<(String, TableMode)> = self
+            .table_modes
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
@@ -110,9 +112,9 @@ impl PlaceholderContext {
             let token = format!("{{{table_name}}}");
             if out.contains(&token) {
                 let expanded = match mode {
-                    TableMode::Append => format!(
-                        "(SELECT * FROM {table_name} WHERE _window_id > {cutoff_str})"
-                    ),
+                    TableMode::Append => {
+                        format!("(SELECT * FROM {table_name} WHERE _window_id > {cutoff_str})")
+                    }
                     _ => table_name.clone(),
                 };
                 out = out.replace(&token, &expanded);

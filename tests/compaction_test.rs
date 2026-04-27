@@ -9,7 +9,8 @@ use hydrocube::retention::RetentionManager;
 // ---------------------------------------------------------------------------
 
 fn minimal_cfg_for_persistence() -> hydrocube::config::CubeConfig {
-    serde_yaml::from_str(r#"
+    serde_yaml::from_str(
+        r#"
 name: test_cube
 tables:
   - name: slices
@@ -25,7 +26,9 @@ aggregation:
   key_columns: [trade_id]
   publish:
     sql: "SELECT trade_id, SUM(quantity) AS qty FROM {slices} GROUP BY trade_id"
-"#).unwrap()
+"#,
+    )
+    .unwrap()
 }
 
 fn open_db() -> DbManager {
@@ -126,17 +129,22 @@ async fn test_compaction_advances_cutoff_without_deleting_rows() {
     db.execute(
         "CREATE TABLE trades (book VARCHAR, notional DOUBLE, _window_id UBIGINT)",
         vec![],
-    ).await.unwrap();
+    )
+    .await
+    .unwrap();
 
     // Insert rows in windows 1 and 2
     for wid in [1u64, 2u64] {
         db.execute(
             &format!("INSERT INTO trades VALUES ('EMEA', 1000.0, {wid})"),
             vec![],
-        ).await.unwrap();
+        )
+        .await
+        .unwrap();
     }
 
-    let cfg: hydrocube::config::CubeConfig = serde_yaml::from_str(r#"
+    let cfg: hydrocube::config::CubeConfig = serde_yaml::from_str(
+        r#"
 name: t
 tables:
   - name: trades
@@ -159,7 +167,9 @@ aggregation:
         GROUP BY book
   publish:
     sql: "SELECT book, SUM(notional) AS total FROM {trades} GROUP BY book"
-"#).unwrap();
+"#,
+    )
+    .unwrap();
 
     let runner = HookRunner::new(cfg, db.clone());
 
@@ -170,13 +180,25 @@ aggregation:
     hydrocube::aggregation::window::set_compaction_cutoff(2);
 
     // Raw rows must still be there (no-delete model)
-    let rows = db.query_json("SELECT COUNT(*) AS cnt FROM trades", vec![]).await.unwrap();
+    let rows = db
+        .query_json("SELECT COUNT(*) AS cnt FROM trades", vec![])
+        .await
+        .unwrap();
     let cnt = rows[0]["cnt"].as_u64().unwrap_or(0);
     assert_eq!(cnt, 2, "raw rows must not be deleted by compaction");
 
     // Compacted table should have been created by the hook SQL
-    let agg = db.query_json("SELECT total FROM intraday_compacted WHERE book = 'EMEA'", vec![]).await.unwrap();
-    assert!(!agg.is_empty(), "compaction SQL should have created intraday_compacted");
+    let agg = db
+        .query_json(
+            "SELECT total FROM intraday_compacted WHERE book = 'EMEA'",
+            vec![],
+        )
+        .await
+        .unwrap();
+    assert!(
+        !agg.is_empty(),
+        "compaction SQL should have created intraday_compacted"
+    );
     assert_eq!(agg[0]["total"].as_f64().unwrap(), 2000.0);
 }
 
@@ -202,15 +224,24 @@ async fn test_consolidated_compaction_pattern() {
             trade_time TIMESTAMP, _window_id UBIGINT
         )",
         vec![],
-    ).await.unwrap();
+    )
+    .await
+    .unwrap();
     db.execute(
         "CREATE TABLE _cube_metadata (
             config_hash VARCHAR, last_window_id UBIGINT DEFAULT 0,
             compaction_cutoff UBIGINT DEFAULT 0, updated_at TIMESTAMP
         )",
         vec![],
-    ).await.unwrap();
-    db.execute("INSERT INTO _cube_metadata VALUES ('h', 0, 0, NOW())", vec![]).await.unwrap();
+    )
+    .await
+    .unwrap();
+    db.execute(
+        "INSERT INTO _cube_metadata VALUES ('h', 0, 0, NOW())",
+        vec![],
+    )
+    .await
+    .unwrap();
 
     // Insert 3 trades in window 1, 2 trades in window 2.
     db.execute(
@@ -221,23 +252,36 @@ async fn test_consolidated_compaction_pattern() {
             ('EMEA', 1500.0, 'SELL', 15.0, NOW(), 2),
             ('ASIA',  800.0, 'BUY',   8.0, NOW(), 2)",
         vec![],
-    ).await.unwrap();
+    )
+    .await
+    .unwrap();
 
     // ── Before compaction ────────────────────────────────────────────────────
     // compaction_cutoff = 0, so the publish-SQL `trades` leg returns all rows.
-    let before = db.query_json(
-        "SELECT book, SUM(notional) AS n FROM (
+    let before = db
+        .query_json(
+            "SELECT book, SUM(notional) AS n FROM (
            SELECT book, notional FROM consolidated
            UNION ALL
            SELECT book, notional FROM trades
            WHERE _window_id > (SELECT COALESCE(MAX(compaction_cutoff),0) FROM _cube_metadata)
          ) t GROUP BY book ORDER BY book",
-        vec![],
-    ).await.unwrap();
+            vec![],
+        )
+        .await
+        .unwrap();
     let emea = before.iter().find(|r| r["book"] == "EMEA").unwrap();
-    assert_eq!(emea["n"].as_f64().unwrap(), 4500.0, "EMEA before compaction");
+    assert_eq!(
+        emea["n"].as_f64().unwrap(),
+        4500.0,
+        "EMEA before compaction"
+    );
     let asia = before.iter().find(|r| r["book"] == "ASIA").unwrap();
-    assert_eq!(asia["n"].as_f64().unwrap(), 1300.0, "ASIA before compaction");
+    assert_eq!(
+        asia["n"].as_f64().unwrap(),
+        1300.0,
+        "ASIA before compaction"
+    );
 
     // ── Simulate compaction of window 1 ─────────────────────────────────────
     // This is what the compaction SQL `INSERT INTO consolidated SELECT * FROM
@@ -246,59 +290,106 @@ async fn test_consolidated_compaction_pattern() {
         "INSERT INTO consolidated
          SELECT * FROM (SELECT * FROM trades WHERE _window_id > 0 AND _window_id <= 1)",
         vec![],
-    ).await.unwrap();
+    )
+    .await
+    .unwrap();
 
     // Advance the cutoff in metadata (mirrors what CompactionThread does after
     // running the hook SQL).
-    db.execute("UPDATE _cube_metadata SET compaction_cutoff = 1", vec![]).await.unwrap();
+    db.execute("UPDATE _cube_metadata SET compaction_cutoff = 1", vec![])
+        .await
+        .unwrap();
 
     // ── Invariant: no raw rows deleted (no-delete model) ─────────────────────
-    let tc = db.query_json("SELECT COUNT(*) AS cnt FROM trades", vec![]).await.unwrap();
-    assert_eq!(tc[0]["cnt"].as_u64().unwrap(), 5, "trades rows must not be deleted");
+    let tc = db
+        .query_json("SELECT COUNT(*) AS cnt FROM trades", vec![])
+        .await
+        .unwrap();
+    assert_eq!(
+        tc[0]["cnt"].as_u64().unwrap(),
+        5,
+        "trades rows must not be deleted"
+    );
 
-    let cc = db.query_json("SELECT COUNT(*) AS cnt FROM consolidated", vec![]).await.unwrap();
-    assert_eq!(cc[0]["cnt"].as_u64().unwrap(), 3, "window-1 rows in consolidated");
+    let cc = db
+        .query_json("SELECT COUNT(*) AS cnt FROM consolidated", vec![])
+        .await
+        .unwrap();
+    assert_eq!(
+        cc[0]["cnt"].as_u64().unwrap(),
+        3,
+        "window-1 rows in consolidated"
+    );
 
     // ── After compaction: publish SQL union must give identical totals ────────
     // consolidated: EMEA 1000+2000=3000, ASIA 500
     // trades WHERE _window_id > 1: EMEA 1500, ASIA 800
     // Expected: EMEA 4500, ASIA 1300
-    let after = db.query_json(
-        "SELECT book, SUM(notional) AS n FROM (
+    let after = db
+        .query_json(
+            "SELECT book, SUM(notional) AS n FROM (
            SELECT book, notional FROM consolidated
            UNION ALL
            SELECT book, notional FROM trades
            WHERE _window_id > (SELECT COALESCE(MAX(compaction_cutoff),0) FROM _cube_metadata)
          ) t GROUP BY book ORDER BY book",
-        vec![],
-    ).await.unwrap();
+            vec![],
+        )
+        .await
+        .unwrap();
     let emea_a = after.iter().find(|r| r["book"] == "EMEA").unwrap();
-    assert_eq!(emea_a["n"].as_f64().unwrap(), 4500.0, "EMEA total unchanged after compaction");
+    assert_eq!(
+        emea_a["n"].as_f64().unwrap(),
+        4500.0,
+        "EMEA total unchanged after compaction"
+    );
     let asia_a = after.iter().find(|r| r["book"] == "ASIA").unwrap();
-    assert_eq!(asia_a["n"].as_f64().unwrap(), 1300.0, "ASIA total unchanged after compaction");
+    assert_eq!(
+        asia_a["n"].as_f64().unwrap(),
+        1300.0,
+        "ASIA total unchanged after compaction"
+    );
 
     // ── Second compaction: window 2 → consolidated ───────────────────────────
     db.execute(
         "INSERT INTO consolidated
          SELECT * FROM (SELECT * FROM trades WHERE _window_id > 1 AND _window_id <= 2)",
         vec![],
-    ).await.unwrap();
-    db.execute("UPDATE _cube_metadata SET compaction_cutoff = 2", vec![]).await.unwrap();
+    )
+    .await
+    .unwrap();
+    db.execute("UPDATE _cube_metadata SET compaction_cutoff = 2", vec![])
+        .await
+        .unwrap();
 
-    let cc2 = db.query_json("SELECT COUNT(*) AS cnt FROM consolidated", vec![]).await.unwrap();
-    assert_eq!(cc2[0]["cnt"].as_u64().unwrap(), 5, "all rows now in consolidated");
+    let cc2 = db
+        .query_json("SELECT COUNT(*) AS cnt FROM consolidated", vec![])
+        .await
+        .unwrap();
+    assert_eq!(
+        cc2[0]["cnt"].as_u64().unwrap(),
+        5,
+        "all rows now in consolidated"
+    );
 
     // Publish SQL: consolidated leg has everything, trades leg returns 0 rows
     // (no trades with _window_id > 2 exist).
-    let final_ = db.query_json(
-        "SELECT book, SUM(notional) AS n FROM (
+    let final_ = db
+        .query_json(
+            "SELECT book, SUM(notional) AS n FROM (
            SELECT book, notional FROM consolidated
            UNION ALL
            SELECT book, notional FROM trades
            WHERE _window_id > (SELECT COALESCE(MAX(compaction_cutoff),0) FROM _cube_metadata)
          ) t GROUP BY book ORDER BY book",
-        vec![],
-    ).await.unwrap();
+            vec![],
+        )
+        .await
+        .unwrap();
     let emea_f = final_.iter().find(|r| r["book"] == "EMEA").unwrap();
-    assert_eq!(emea_f["n"].as_f64().unwrap(), 4500.0, "EMEA total correct after full compaction");
+    assert_eq!(
+        emea_f["n"].as_f64().unwrap(),
+        4500.0,
+        "EMEA total correct after full compaction"
+    );
 }

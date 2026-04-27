@@ -14,7 +14,8 @@ use tokio::sync::{broadcast, mpsc, watch};
 
 /// Build a minimal new-format CubeConfig inline (cube.example.yaml uses the old format).
 fn test_config() -> hydrocube::config::CubeConfig {
-    serde_yaml::from_str(r#"
+    serde_yaml::from_str(
+        r#"
 name: test_cube
 tables:
   - name: trades
@@ -43,7 +44,9 @@ aggregation:
   key_columns: [book]
   publish:
     sql: "SELECT book, SUM(notional) AS total FROM trades WHERE _window_id > 0 GROUP BY book"
-"#).unwrap()
+"#,
+    )
+    .unwrap()
 }
 
 #[test]

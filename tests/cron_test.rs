@@ -1,5 +1,5 @@
-use hydrocube::hooks::cron::{next_fire_after, parse_schedule};
 use chrono::{TimeZone, Timelike, Utc};
+use hydrocube::hooks::cron::{next_fire_after, parse_schedule};
 
 #[test]
 fn test_parse_five_field_schedule() {
@@ -35,9 +35,12 @@ fn test_invalid_schedule_returns_error() {
     assert!(result.is_err());
 }
 
-use std::sync::{Arc, atomic::{AtomicU64, Ordering}};
-use tokio::sync::watch;
 use hydrocube::hooks::cron::spawn_cron_task;
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
+use tokio::sync::watch;
 
 #[tokio::test]
 async fn test_cron_task_fires_callback() {
@@ -48,12 +51,16 @@ async fn test_cron_task_fires_callback() {
     let schedule = parse_schedule("* * * * * *").unwrap();
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
 
-    let handle = spawn_cron_task(schedule, move |_fired_at| {
-        let c = counter_clone.clone();
-        async move {
-            c.fetch_add(1, Ordering::SeqCst);
-        }
-    }, shutdown_rx);
+    let handle = spawn_cron_task(
+        schedule,
+        move |_fired_at| {
+            let c = counter_clone.clone();
+            async move {
+                c.fetch_add(1, Ordering::SeqCst);
+            }
+        },
+        shutdown_rx,
+    );
 
     // Wait 2.5 seconds — should have fired at least 2 times
     tokio::time::sleep(std::time::Duration::from_millis(2500)).await;

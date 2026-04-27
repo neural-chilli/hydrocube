@@ -209,9 +209,12 @@ pub async fn run_hot_path(
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn parse_row_for_table(bytes: &[u8], table_cfg: &crate::config::TableConfig) -> HcResult<Vec<Value>> {
-    let v: Value = serde_json::from_slice(bytes)
-        .map_err(|e| crate::error::HcError::Ingest(e.to_string()))?;
+fn parse_row_for_table(
+    bytes: &[u8],
+    table_cfg: &crate::config::TableConfig,
+) -> HcResult<Vec<Value>> {
+    let v: Value =
+        serde_json::from_slice(bytes).map_err(|e| crate::error::HcError::Ingest(e.to_string()))?;
     Ok(table_cfg
         .schema
         .columns
@@ -258,11 +261,7 @@ fn build_insert_sql_for_table(
 }
 
 /// Build a single-row `INSERT INTO <table>` for replace-mode rows (no _window_id).
-fn build_single_row_insert(
-    table_name: &str,
-    columns: &[ColumnDef],
-    row: &[Value],
-) -> String {
+fn build_single_row_insert(table_name: &str, columns: &[ColumnDef], row: &[Value]) -> String {
     let col_list = columns
         .iter()
         .map(|c| c.name.as_str())
@@ -274,5 +273,8 @@ fn build_single_row_insert(
         .map(|(v, col)| value_to_sql(v, &col.col_type))
         .collect::<Vec<_>>()
         .join(", ");
-    format!("INSERT INTO {} ({}) VALUES ({})", table_name, col_list, vals)
+    format!(
+        "INSERT INTO {} ({}) VALUES ({})",
+        table_name, col_list, vals
+    )
 }

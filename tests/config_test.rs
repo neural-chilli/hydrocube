@@ -1,6 +1,6 @@
 use hydrocube::config::{
-    AggregationConfig, CubeConfig, DataFormat, LoadTiming, PublishHookConfig,
-    SourceConfig, SourceType, TableConfig, TableMode,
+    AggregationConfig, CubeConfig, DataFormat, LoadTiming, PublishHookConfig, SourceConfig,
+    SourceType, TableConfig, TableMode,
 };
 
 fn minimal_new_config_yaml() -> &'static str {
@@ -154,7 +154,10 @@ aggregation:
 "#;
     let cfg: CubeConfig = serde_yaml::from_str(yaml).unwrap();
     let err = cfg.validate().unwrap_err().to_string();
-    assert!(err.contains("duplicate") || err.contains("trades"), "got: {err}");
+    assert!(
+        err.contains("duplicate") || err.contains("trades"),
+        "got: {err}"
+    );
 }
 
 #[test]

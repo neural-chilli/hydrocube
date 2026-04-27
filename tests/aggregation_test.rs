@@ -13,7 +13,8 @@ use hydrocube::persistence;
 
 /// Build a CubeConfig that mirrors the schema in cube.example.yaml.
 fn trading_config() -> CubeConfig {
-    serde_yaml::from_str(r#"
+    serde_yaml::from_str(
+        r#"
 name: trading_positions
 description: "Real-time position aggregation by book"
 tables:
@@ -55,7 +56,9 @@ aggregation:
         MAX(trade_time) AS max_trade_time
       FROM slices
       GROUP BY book, desk, instrument_type, currency
-"#).unwrap()
+"#,
+    )
+    .unwrap()
 }
 
 /// Open a fresh in-memory DbManager and initialise it with the trading config.
@@ -168,10 +171,7 @@ async fn test_aggregation_returns_arrow() {
 
     // Run the aggregation via the Arrow path.
     let sql = &config.aggregation.publish.sql;
-    let batches = db
-        .query_arrow(sql)
-        .await
-        .expect("query_arrow failed");
+    let batches = db.query_arrow(sql).await.expect("query_arrow failed");
 
     // At least one batch must be returned.
     assert!(!batches.is_empty(), "expected at least one RecordBatch");

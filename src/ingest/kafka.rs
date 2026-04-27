@@ -63,11 +63,7 @@ impl KafkaSource {
 #[cfg(feature = "kafka")]
 #[async_trait::async_trait]
 impl super::IngestSource for KafkaSource {
-    async fn run(
-        &self,
-        tx: IngestSender,
-        mut shutdown: watch::Receiver<bool>,
-    ) -> HcResult<()> {
+    async fn run(&self, tx: IngestSender, mut shutdown: watch::Receiver<bool>) -> HcResult<()> {
         let consumer: StreamConsumer = ClientConfig::new()
             .set("bootstrap.servers", &self.brokers)
             .set("group.id", &self.group_id)

@@ -7,12 +7,12 @@ use std::time::Instant;
 
 use crate::aggregation::window::{compaction_cutoff, WINDOW_ID};
 use crate::config::CubeConfig;
+use crate::config::TableMode;
 use crate::db_manager::{arrow::compute::concat_batches, DbManager};
 use crate::error::HcError;
 use crate::publish::{batch_to_base64_arrow, DeltaEvent};
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use crate::config::TableMode;
 use axum::response::{IntoResponse, Json};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -229,7 +229,8 @@ pub async fn drillthrough_handler(
     };
 
     if table_cfg.mode != TableMode::Append {
-        let body = json!({ "error": format!("table '{}' is not an append-mode table", table_name) });
+        let body =
+            json!({ "error": format!("table '{}' is not an append-mode table", table_name) });
         return Err((StatusCode::BAD_REQUEST, Json(body)));
     }
 
@@ -237,13 +238,13 @@ pub async fn drillthrough_handler(
 
     // Count rows first to enforce limit
     let count_sql = format!("SELECT COUNT(*) AS cnt FROM {}", table_name);
-    let count_rows = state.db.query_json(&count_sql, vec![]).await
-        .map_err(|e| {
-            let body = json!({ "error": e.to_string() });
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(body))
-        })?;
+    let count_rows = state.db.query_json(&count_sql, vec![]).await.map_err(|e| {
+        let body = json!({ "error": e.to_string() });
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(body))
+    })?;
 
-    let row_count = count_rows.first()
+    let row_count = count_rows
+        .first()
         .and_then(|r| r.get("cnt"))
         .and_then(|v| v.as_u64())
         .unwrap_or(0) as usize;
@@ -257,17 +258,15 @@ pub async fn drillthrough_handler(
 
     // Fetch rows as Arrow IPC
     let fetch_sql = format!("SELECT * FROM {}", table_name);
-    let batches = state.db.query_arrow(fetch_sql).await
-        .map_err(|e| {
-            let body = json!({ "error": e.to_string() });
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(body))
-        })?;
+    let batches = state.db.query_arrow(fetch_sql).await.map_err(|e| {
+        let body = json!({ "error": e.to_string() });
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(body))
+    })?;
 
-    let (actual_rows, b64) = concat_and_serialize(&batches)
-        .map_err(|e| {
-            let body = json!({ "error": e.0.to_string() });
-            (StatusCode::INTERNAL_SERVER_ERROR, Json(body))
-        })?;
+    let (actual_rows, b64) = concat_and_serialize(&batches).map_err(|e| {
+        let body = json!({ "error": e.0.to_string() });
+        (StatusCode::INTERNAL_SERVER_ERROR, Json(body))
+    })?;
 
     Ok(Json(json!({
         "table": table_name,
@@ -286,15 +285,14 @@ pub async fn reaggregate_handler(
     // Re-run the startup hook SQL if declared
     if let Some(startup) = &state.config.aggregation.startup {
         if let Some(sql) = &startup.sql {
-            use crate::hooks::placeholder::PlaceholderContext;
             use crate::aggregation::window::compaction_cutoff;
-            let mut ctx = PlaceholderContext::new(
-                compaction_cutoff(),
-                None,
-                chrono::Utc::now(),
-                None,
-            );
-            ctx.table_modes = state.config.tables.iter()
+            use crate::hooks::placeholder::PlaceholderContext;
+            let mut ctx =
+                PlaceholderContext::new(compaction_cutoff(), None, chrono::Utc::now(), None);
+            ctx.table_modes = state
+                .config
+                .tables
+                .iter()
                 .map(|t| (t.name.clone(), t.mode.clone()))
                 .collect();
             let expanded = ctx.expand(sql);
@@ -308,5 +306,7 @@ pub async fn reaggregate_handler(
         }
     }
 
-    Ok(Json(json!({ "status": "ok", "message": "re-aggregation complete" })))
+    Ok(Json(
+        json!({ "status": "ok", "message": "re-aggregation complete" }),
+    ))
 }
