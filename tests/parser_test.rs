@@ -134,3 +134,51 @@ fn test_parse_json_malformed_returns_error() {
         err_str
     );
 }
+
+#[test]
+fn test_csv_parser_two_data_rows() {
+    use hydrocube::ingest::parser::CsvParser;
+    use serde_json::Value;
+
+    let cols = vec![
+        make_column("trade_id"),
+        make_column("book"),
+        make_column("notional"),
+    ];
+    let parser = CsvParser::new(&cols);
+
+    let csv_bytes = b"trade_id,book,notional\nT001,FX,1000000\nT002,IR,500000\n";
+    let rows = parser.parse(csv_bytes).expect("should parse");
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0][0], Value::String("T001".into()));
+    assert_eq!(rows[0][1], Value::String("FX".into()));
+    assert_eq!(rows[0][2], Value::String("1000000".into()));
+    assert_eq!(rows[1][0], Value::String("T002".into()));
+}
+
+#[test]
+fn test_csv_parser_missing_column_becomes_null() {
+    use hydrocube::ingest::parser::CsvParser;
+    use serde_json::Value;
+
+    let cols = vec![make_column("a"), make_column("b"), make_column("c")];
+    let parser = CsvParser::new(&cols);
+
+    let csv_bytes = b"a,b\nv1,v2\n";
+    let rows = parser.parse(csv_bytes).expect("should parse");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0][2], Value::Null);
+}
+
+#[test]
+fn test_csv_parser_extra_columns_ignored() {
+    use hydrocube::ingest::parser::CsvParser;
+
+    let cols = vec![make_column("a")];
+    let parser = CsvParser::new(&cols);
+
+    let csv_bytes = b"a,b,c\nv1,extra1,extra2\n";
+    let rows = parser.parse(csv_bytes).expect("should parse");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].len(), 1);
+}

@@ -58,9 +58,54 @@ pub fn parse_rows_for_table(
             }
             Ok(rows)
         }
+        DataFormat::Csv => {
+            let parser = CsvParser::new(&table_cfg.schema.columns);
+            parser.parse(bytes)
+        }
         _ => Err(HcError::Ingest(format!(
             "format {:?} not yet supported for streaming messages",
             format
         ))),
+    }
+}
+
+pub struct CsvParser {
+    column_names: Vec<String>,
+}
+
+impl CsvParser {
+    pub fn new(columns: &[ColumnDef]) -> Self {
+        Self {
+            column_names: columns.iter().map(|c| c.name.clone()).collect(),
+        }
+    }
+
+    pub fn parse(&self, data: &[u8]) -> HcResult<Vec<Vec<Value>>> {
+        let mut rdr = csv::Reader::from_reader(data);
+        let headers = rdr
+            .headers()
+            .map_err(|e| HcError::Ingest(e.to_string()))?
+            .clone();
+
+        let header_index: std::collections::HashMap<&str, usize> =
+            headers.iter().enumerate().map(|(i, h)| (h, i)).collect();
+
+        let mut rows = Vec::new();
+        for result in rdr.records() {
+            let record = result.map_err(|e| HcError::Ingest(e.to_string()))?;
+            let row = self
+                .column_names
+                .iter()
+                .map(|col_name| {
+                    header_index
+                        .get(col_name.as_str())
+                        .and_then(|&idx| record.get(idx))
+                        .map(|s| Value::String(s.to_owned()))
+                        .unwrap_or(Value::Null)
+                })
+                .collect();
+            rows.push(row);
+        }
+        Ok(rows)
     }
 }
