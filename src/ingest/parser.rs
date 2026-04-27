@@ -1,7 +1,7 @@
 // src/ingest/parser.rs
 use serde_json::Value;
 
-use crate::config::ColumnDef;
+use crate::config::{ColumnDef, DataFormat, TableConfig};
 use crate::error::{HcError, HcResult};
 
 /// Parses raw JSON bytes into an ordered row of `serde_json::Value`s,
@@ -35,5 +35,29 @@ impl JsonParser {
             .collect();
 
         Ok(row)
+    }
+}
+
+/// Parse raw bytes into one or more rows according to `format`.
+///
+/// Returns `Vec<Vec<Value>>` so that formats like CSV or JSON Lines can yield
+/// multiple rows per message. JSON always returns exactly one row.
+///
+/// `_decoders` is a placeholder for the Avro/Protobuf decoder map wired in Task 4.
+pub fn parse_rows_for_table(
+    bytes: &[u8],
+    format: &DataFormat,
+    table_cfg: &TableConfig,
+    _decoders: Option<&()>,
+) -> HcResult<Vec<Vec<Value>>> {
+    match format {
+        DataFormat::Json | DataFormat::JsonLines => {
+            let parser = JsonParser::new(&table_cfg.schema.columns);
+            parser.parse(bytes).map(|row| vec![row])
+        }
+        _ => Err(HcError::Ingest(format!(
+            "format {:?} not yet supported for streaming messages",
+            format
+        ))),
     }
 }

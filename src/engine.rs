@@ -172,14 +172,23 @@ pub async fn run_hot_path(
                     Some(raw_msg) => {
                         if let Some(buf) = buffers.get_mut(&raw_msg.table) {
                             if let Some(table_cfg) = config.table(&raw_msg.table) {
-                                match parse_row_for_table(&raw_msg.bytes, table_cfg) {
-                                    Ok(row) => match buf {
-                                        TableBuffer::Append(_) => buf.push_append(row),
-                                        TableBuffer::Replace(_) => buf.upsert_replace(row),
-                                    },
+                                match crate::ingest::parser::parse_rows_for_table(
+                                    &raw_msg.bytes,
+                                    &raw_msg.format,
+                                    table_cfg,
+                                    None,
+                                ) {
+                                    Ok(rows) => {
+                                        for row in rows {
+                                            match buf {
+                                                TableBuffer::Append(_) => buf.push_append(row),
+                                                TableBuffer::Replace(_) => buf.upsert_replace(row),
+                                            }
+                                        }
+                                    }
                                     Err(e) => tracing::warn!(
                                         target: "ingest",
-                                        "Parse error for {}: {}",
+                                        "Parse error for table '{}': {}",
                                         raw_msg.table,
                                         e
                                     ),
@@ -208,20 +217,6 @@ pub async fn run_hot_path(
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-fn parse_row_for_table(
-    bytes: &[u8],
-    table_cfg: &crate::config::TableConfig,
-) -> HcResult<Vec<Value>> {
-    let v: Value =
-        serde_json::from_slice(bytes).map_err(|e| crate::error::HcError::Ingest(e.to_string()))?;
-    Ok(table_cfg
-        .schema
-        .columns
-        .iter()
-        .map(|c| v.get(&c.name).cloned().unwrap_or(Value::Null))
-        .collect())
-}
 
 /// Build a bulk `INSERT INTO <table>` statement for all rows in a window.
 ///
