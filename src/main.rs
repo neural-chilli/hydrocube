@@ -332,6 +332,37 @@ async fn main() {
     let _hk_handles = spawn_housekeeping_cron_tasks(&config, db.clone(), shutdown_rx.clone());
 
     // -------------------------------------------------------------------------
+    // 13d. Spawn interval-refresh tasks for reference file sources
+    // -------------------------------------------------------------------------
+    for src in config.sources.iter().cloned() {
+        if src.source_type == hydrocube::config::SourceType::File {
+            if let Some(hydrocube::config::RefreshStrategy::Interval { ref interval }) = src.refresh
+            {
+                match hydrocube::config::parse_duration_str(interval) {
+                    Ok(secs) => {
+                        let dur = std::time::Duration::from_secs(secs);
+                        let db_clone = db.clone();
+                        let shutdown = shutdown_rx.clone();
+                        tokio::spawn(async move {
+                            hydrocube::ingest::reference::run_interval_refresh(
+                                db_clone, src, dur, shutdown,
+                            )
+                            .await;
+                        });
+                    }
+                    Err(_) => {
+                        tracing::warn!(
+                            target: "main",
+                            "invalid interval '{}' for source targeting '{}' — skipping refresh task",
+                            interval, src.table
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // 14. Start web server if UI enabled
     // -------------------------------------------------------------------------
     // In the new config, UI is always enabled unless --no-ui is passed.
