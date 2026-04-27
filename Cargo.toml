@@ -53,6 +53,9 @@ minijinja = { version = "2", features = ["loader"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 
+# Avro
+apache-avro = "0.17"
+
 # Misc
 csv = "1"
 base64 = "0.22"
@@ -69,6 +72,7 @@ mime_guess = "2"
 [dev-dependencies]
 tempfile = "3"
 tokio-test = "0.4"
+apache-avro = "0.17"
 
 [profile.release]
 opt-level = 3

@@ -67,6 +67,8 @@ pub async fn run_hot_path(
         })
         .collect();
 
+    let decoders = crate::ingest::build_decoder_map(&config)?;
+
     let mut tick = tokio::time::interval(Duration::from_millis(config.window.interval_ms));
     let mut flush_counter = 0u64;
 
@@ -176,7 +178,7 @@ pub async fn run_hot_path(
                                     &raw_msg.bytes,
                                     &raw_msg.format,
                                     table_cfg,
-                                    None,
+                                    Some(&decoders),
                                 ) {
                                     Ok(rows) => {
                                         for row in rows {

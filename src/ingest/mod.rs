@@ -1,4 +1,5 @@
 // src/ingest/mod.rs
+pub mod avro;
 pub mod file;
 pub mod nats;
 pub mod parser;
@@ -35,4 +36,31 @@ pub trait IngestSource: Send + Sync {
 
     /// Commit offsets / acknowledge the current position.
     async fn commit(&self) -> HcResult<()>;
+}
+
+use std::collections::HashMap;
+
+pub enum CompiledDecoder {
+    Avro(avro::AvroDecoder),
+}
+
+pub type CompiledDecoderMap = HashMap<String, CompiledDecoder>;
+
+pub fn build_decoder_map(
+    config: &crate::config::CubeConfig,
+) -> crate::error::HcResult<CompiledDecoderMap> {
+    let mut map = CompiledDecoderMap::new();
+    for src in &config.sources {
+        if src.format == crate::config::DataFormat::Avro {
+            let schema_json = src
+                .avro_schema
+                .as_deref()
+                .expect("validated before this point");
+            if let Some(table_cfg) = config.table(&src.table) {
+                let decoder = avro::AvroDecoder::new(schema_json, &table_cfg.schema.columns)?;
+                map.insert(src.table.clone(), CompiledDecoder::Avro(decoder));
+            }
+        }
+    }
+    Ok(map)
 }

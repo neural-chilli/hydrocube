@@ -3,6 +3,7 @@ use serde_json::Value;
 
 use crate::config::{ColumnDef, DataFormat, TableConfig};
 use crate::error::{HcError, HcResult};
+use crate::ingest::{CompiledDecoder, CompiledDecoderMap};
 
 pub struct JsonParser {
     column_names: Vec<String>,
@@ -33,13 +34,11 @@ impl JsonParser {
 ///
 /// Returns `Vec<Vec<Value>>` so that formats like CSV or JSON Lines can yield
 /// multiple rows per message. JSON always returns exactly one row.
-///
-/// `_decoders` is a placeholder for the Avro/Protobuf decoder map wired in Task 4.
 pub fn parse_rows_for_table(
     bytes: &[u8],
     format: &DataFormat,
     table_cfg: &TableConfig,
-    _decoders: Option<&()>,
+    decoders: Option<&CompiledDecoderMap>,
 ) -> HcResult<Vec<Vec<Value>>> {
     match format {
         DataFormat::Json => {
@@ -61,6 +60,17 @@ pub fn parse_rows_for_table(
         DataFormat::Csv => {
             let parser = CsvParser::new(&table_cfg.schema.columns);
             parser.parse(bytes)
+        }
+        DataFormat::Avro => {
+            if let Some(map) = decoders {
+                if let Some(CompiledDecoder::Avro(dec)) = map.get(&table_cfg.name) {
+                    return dec.decode(bytes);
+                }
+            }
+            Err(HcError::Ingest(format!(
+                "no Avro decoder compiled for table '{}'",
+                table_cfg.name
+            )))
         }
         _ => Err(HcError::Ingest(format!(
             "format {:?} not yet supported for streaming messages",
