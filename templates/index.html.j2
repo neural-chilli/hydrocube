@@ -176,6 +176,19 @@
       font-size: 13px;
       font-family: 'SFMono-Regular', Menlo, monospace;
     }
+
+    .peer-offline {
+      display: block;
+      padding: .25rem 1rem;
+      font-size: .875rem;
+      opacity: 0.45;
+      cursor: default;
+      user-select: none;
+    }
+    .peer-offline::after {
+      content: ' ⚠';
+      font-size: .75em;
+    }
   </style>
 </head>
 <body>
@@ -188,15 +201,13 @@
        style="border-radius:5px;flex-shrink:0" onerror="this.style.display='none'">
   <span id="nav-brand">HydroCube</span>
 
-  <!-- Cube selector -->
-  <div class="dropdown ms-1">
-    <button class="nav-btn dropdown-toggle" data-bs-toggle="dropdown">
+  <!-- Cube selector — populated dynamically from /api/peers -->
+  <div class="dropdown ms-1" id="cube-selector-dropdown">
+    <button class="nav-btn dropdown-toggle" data-bs-toggle="dropdown" id="cube-selector-btn">
       ⬡ {{ cube_name }}
     </button>
-    <ul class="dropdown-menu shadow-sm">
-      <li><a class="dropdown-item active" href="#">{{ cube_name }}</a></li>
-      <li><hr class="dropdown-divider"></li>
-      <li><a class="dropdown-item text-muted" href="#"><em>Connect to another cube…</em></a></li>
+    <ul class="dropdown-menu shadow-sm" id="cube-selector-menu">
+      <li><a class="dropdown-item active" href="#">⬡ {{ cube_name }}</a></li>
     </ul>
   </div>
 
@@ -246,6 +257,25 @@
 
 <!-- ═══════════════════════════════════════════════════ Perspective pane -->
 <div id="perspective-wrapper">
+  <!-- Not-authorised overlay — hidden until showNotAuthorised() is called -->
+  <div id="not-authorised-overlay"
+       style="display:none; position:absolute; inset:0; z-index:200;
+              background:var(--bs-body-bg,#fff); align-items:center;
+              justify-content:center; flex-direction:column; gap:12px;
+              text-align:center; padding:40px;">
+    <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" fill="none"
+         viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"
+         style="color:#6c757d">
+      <path stroke-linecap="round" stroke-linejoin="round"
+            d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71
+               3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+    </svg>
+    <h5 style="margin:0;color:#343a40">Not Authorised</h5>
+    <p style="margin:0;color:#6c757d;max-width:360px">
+      You are not authorised to access this cube.<br>
+      Contact your administrator.
+    </p>
+  </div>
   <div id="psp-loading">
     <div class="psp-spinner"></div>
     <div>Connecting to HydroCube…</div>
@@ -417,6 +447,55 @@ document.addEventListener('fullscreenchange', () => {
 });
 
 
+// ── Auth / peer discovery ─────────────────────────────────────────────────────
+let _notAuthorised = false;
+
+function showNotAuthorised() {
+  if (_notAuthorised) return;
+  _notAuthorised = true;
+  const overlay = document.getElementById('not-authorised-overlay');
+  if (overlay) overlay.style.display = 'flex';
+}
+
+async function loadPeers() {
+  let data;
+  try {
+    const resp = await fetch('/api/peers');
+    if (resp.status === 401) { showNotAuthorised(); return; }
+    if (!resp.ok) return;
+    data = await resp.json();
+  } catch (_) {
+    return;
+  }
+
+  const menu = document.getElementById('cube-selector-menu');
+  if (!menu || !data) return;
+
+  menu.innerHTML = '';
+
+  const selfLi = document.createElement('li');
+  selfLi.innerHTML = `<a class="dropdown-item active" href="#">⬡ ${data.self.name}</a>`;
+  menu.appendChild(selfLi);
+
+  if (data.peers && data.peers.length > 0) {
+    const divLi = document.createElement('li');
+    divLi.innerHTML = '<hr class="dropdown-divider">';
+    menu.appendChild(divLi);
+
+    for (const peer of data.peers) {
+      const li = document.createElement('li');
+      const label = peer.description || peer.name;
+      if (peer.status === 'offline') {
+        li.innerHTML = `<span class="peer-offline">⬡ ${label}</span>`;
+      } else {
+        li.innerHTML = `<a class="dropdown-item" href="${peer.url}">⬡ ${label}</a>`;
+      }
+      menu.appendChild(li);
+    }
+  }
+}
+
+
 // ── Perspective table ─────────────────────────────────────────────────────────
 let worker = null;
 let table  = null;
@@ -431,8 +510,10 @@ function b64ToBuffer(b64) {
 // First load: fetch full snapshot, create indexed table, attach to viewer.
 async function loadSnapshot() {
   try {
-    const resp = await fetch('/api/snapshot');
-    if (!resp.ok) return false;
+    const snapResp = await fetch('/api/snapshot');
+    if (snapResp.status === 401) { showNotAuthorised(); return false; }
+    if (!snapResp.ok) throw new Error('Snapshot fetch failed: ' + snapResp.status);
+    const resp = snapResp;
     const data = await resp.json();
     if (!data.arrow_ipc_b64 || data.row_count === 0) {
       // Server reachable but no data yet — update overlay text so user knows
@@ -469,12 +550,6 @@ async function loadSnapshot() {
     return false;
   }
 }
-
-loadSnapshot();
-
-// Full resync every 60 s to handle any row deletions / compaction drift.
-setInterval(() => { if (table) loadSnapshot(); }, 60_000);
-
 
 // ── Delta rate ────────────────────────────────────────────────────────────────
 let deltaTs = [];
@@ -523,8 +598,6 @@ function connectSSE() {
   };
 }
 
-connectSSE();
-
 
 // ── Status polling ────────────────────────────────────────────────────────────
 function fmtUptime(s) {
@@ -542,8 +615,22 @@ function pollStatus() {
   }).catch(() => {});
 }
 
-pollStatus();
-setInterval(pollStatus, 5000);
+
+// ── Initialisation ────────────────────────────────────────────────────────────
+(async () => {
+  await loadPeers();
+  if (_notAuthorised) return;
+
+  loadSnapshot();
+
+  // Full resync every 60 s to handle any row deletions / compaction drift.
+  setInterval(() => { if (table) loadSnapshot(); }, 60_000);
+
+  connectSSE();
+
+  pollStatus();
+  setInterval(pollStatus, 5000);
+})();
 
 
 // ── Alerts panel ──────────────────────────────────────────────────────────────
