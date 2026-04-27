@@ -267,3 +267,62 @@ aggregation:
     let n = rows[0]["n"].as_i64().unwrap_or(0);
     assert!(n >= 1, "housekeeping cron must have fired at least once, got {n}");
 }
+
+#[tokio::test]
+async fn test_reset_hook_executes_sql_and_repopulates_cache() {
+    use hydrocube::startup::run_reset_sequence;
+
+    let db = DbManager::open_in_memory().unwrap();
+
+    // Pre-create the trades table and seed rows so the cache population has data.
+    db.execute(
+        "CREATE TABLE trades (trade_id VARCHAR, book VARCHAR, _window_id UBIGINT)",
+        vec![],
+    )
+    .await
+    .unwrap();
+    db.execute(
+        "INSERT INTO trades VALUES ('R001', 'EMEA', 1), ('R002', 'APAC', 1)",
+        vec![],
+    )
+    .await
+    .unwrap();
+
+    let cfg: hydrocube::config::CubeConfig = serde_yaml::from_str(
+        r#"
+name: test
+tables:
+  - name: trades
+    mode: append
+    schema:
+      columns:
+        - { name: trade_id, type: VARCHAR }
+        - { name: book,     type: VARCHAR }
+sources:
+  - type: http
+    table: trades
+    identity_key: trade_id
+window: { interval_ms: 1000 }
+persistence: { enabled: false, path: ":memory:", flush_interval: 10 }
+aggregation:
+  key_columns: [book]
+  reset:
+    schedule: "0 0 * * *"
+    sql: "CREATE TABLE IF NOT EXISTS reset_marker (ran BOOLEAN)"
+  publish:
+    sql: "SELECT book FROM trades GROUP BY book"
+"#,
+    )
+    .unwrap();
+
+    let cache = run_reset_sequence(&db, &cfg).await.unwrap();
+
+    // Reset SQL must have run.
+    db.execute("INSERT INTO reset_marker VALUES (true)", vec![])
+        .await
+        .expect("reset_marker must exist after reset sequence");
+
+    // Identity cache must be repopulated from post-reset DB state.
+    assert!(cache.seen("trades", "R001"), "R001 must be in cache after reset");
+    assert!(cache.seen("trades", "R002"), "R002 must be in cache after reset");
+}

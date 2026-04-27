@@ -18,7 +18,7 @@ use hydrocube::hooks::cron::{spawn_housekeeping_cron_tasks, spawn_snapshot_cron_
 use hydrocube::persistence;
 use hydrocube::publish::DeltaEvent;
 use hydrocube::shutdown::shutdown_signal;
-use hydrocube::startup::run_startup_sequence;
+use hydrocube::startup::{run_reset_sequence, run_startup_sequence};
 use hydrocube::web::server::start_server;
 
 #[tokio::main]
@@ -100,6 +100,10 @@ async fn main() {
     if cli.reset {
         if let Err(e) = persistence::reset(&db, &config).await {
             error!("Reset failed: {}", e);
+            std::process::exit(exit_code::PERSISTENCE_FAILURE);
+        }
+        if let Err(e) = run_reset_sequence(&db, &config).await {
+            error!("Reset hook failed: {}", e);
             std::process::exit(exit_code::PERSISTENCE_FAILURE);
         }
         info!("Reset complete.");
