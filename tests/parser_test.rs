@@ -93,6 +93,31 @@ fn test_parse_rows_json_single_object_returns_one_row() {
 }
 
 #[test]
+fn test_parse_rows_jsonlines_two_lines_returns_two_rows() {
+    use hydrocube::config::{ColumnDef, DataFormat, SchemaConfig, TableConfig, TableMode};
+    use hydrocube::ingest::parser::parse_rows_for_table;
+
+    let cols = vec![ColumnDef {
+        name: "id".into(),
+        col_type: "VARCHAR".into(),
+    }];
+    let table_cfg = TableConfig {
+        name: "t".into(),
+        mode: TableMode::Append,
+        event_time_column: None,
+        key_columns: None,
+        schema: SchemaConfig { columns: cols },
+    };
+
+    let bytes = b"{\"id\":\"a\"}\n{\"id\":\"b\"}\n";
+    let rows = parse_rows_for_table(bytes, &DataFormat::JsonLines, &table_cfg, None)
+        .expect("should parse");
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0][0], serde_json::Value::String("a".into()));
+    assert_eq!(rows[1][0], serde_json::Value::String("b".into()));
+}
+
+#[test]
 fn test_parse_json_malformed_returns_error() {
     let columns = vec![make_column("sensor_id")];
     let parser = JsonParser::new(&columns);
