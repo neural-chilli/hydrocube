@@ -433,3 +433,60 @@ aggregation:
         "expected proto_message error, got: {msg}"
     );
 }
+
+#[test]
+fn test_validate_rejects_replace_table_key_column_not_in_schema() {
+    use hydrocube::config::CubeConfig;
+    let yaml = r#"
+name: test
+tables:
+  - name: market_data
+    mode: replace
+    key_columns: [curve, tenor]
+    schema:
+      columns:
+        - { name: curve, type: VARCHAR }
+        - { name: rate, type: DOUBLE }
+sources: []
+window: { interval_ms: 1000 }
+persistence: { path: ":memory:", flush_interval: 10 }
+aggregation:
+  key_columns: [curve]
+  publish:
+    sql: "SELECT curve FROM market_data"
+"#;
+    let config: CubeConfig = serde_yaml::from_str(yaml).unwrap();
+    let result = config.validate();
+    assert!(result.is_err());
+    let msg = result.unwrap_err().to_string();
+    assert!(
+        msg.contains("tenor"),
+        "error should mention missing key column 'tenor', got: {msg}"
+    );
+}
+
+#[test]
+fn test_validate_accepts_replace_table_all_key_columns_in_schema() {
+    use hydrocube::config::CubeConfig;
+    let yaml = r#"
+name: test
+tables:
+  - name: market_data
+    mode: replace
+    key_columns: [curve, tenor]
+    schema:
+      columns:
+        - { name: curve, type: VARCHAR }
+        - { name: tenor, type: VARCHAR }
+        - { name: rate, type: DOUBLE }
+sources: []
+window: { interval_ms: 1000 }
+persistence: { path: ":memory:", flush_interval: 10 }
+aggregation:
+  key_columns: [curve]
+  publish:
+    sql: "SELECT curve FROM market_data"
+"#;
+    let config: CubeConfig = serde_yaml::from_str(yaml).unwrap();
+    assert!(config.validate().is_ok());
+}

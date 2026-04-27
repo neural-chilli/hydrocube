@@ -473,6 +473,20 @@ impl CubeConfig {
                         table.name
                     )));
                 }
+                let schema_col_names: std::collections::HashSet<&str> = table
+                    .schema
+                    .columns
+                    .iter()
+                    .map(|c| c.name.as_str())
+                    .collect();
+                for key_col in table.key_columns.as_deref().unwrap_or_default() {
+                    if !schema_col_names.contains(key_col.as_str()) {
+                        return Err(HcError::Config(format!(
+                            "replace table '{}': key_column '{}' is not declared in the table schema",
+                            table.name, key_col
+                        )));
+                    }
+                }
             }
             if table.schema.columns.is_empty() {
                 return Err(HcError::Config(format!(
