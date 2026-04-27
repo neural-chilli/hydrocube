@@ -2,9 +2,10 @@
 use std::collections::HashMap;
 
 use chrono::Utc;
+use mlua::Lua;
 
 use crate::aggregation::window::compaction_cutoff;
-use crate::config::{CubeConfig, SourceType};
+use crate::config::{CubeConfig, LuaBlock, SourceType};
 use crate::db_manager::DbManager;
 use crate::error::{HcError, HcResult};
 use crate::hooks::placeholder::PlaceholderContext;
@@ -50,11 +51,74 @@ impl HookRunner {
         ctx
     }
 
+    /// Execute a Lua pre-step for a hook.
+    ///
+    /// The Lua function is called with no arguments. If it returns a string or
+    /// a table of strings, each string is executed as a DuckDB statement before
+    /// the hook's SQL step runs.
+    async fn exec_lua_prestep(&self, lua_block: &LuaBlock) -> HcResult<()> {
+        let lua_code = lua_block
+            .inline
+            .as_deref()
+            .or(lua_block.script.as_deref())
+            .ok_or_else(|| {
+                HcError::Config("hook lua block needs inline or script".into())
+            })?;
+
+        let lua = Lua::new();
+        lua.load(lua_code)
+            .exec()
+            .map_err(|e| HcError::Transform(format!("hook Lua load: {e}")))?;
+
+        let func: mlua::Function = lua
+            .globals()
+            .get(lua_block.function.as_str())
+            .map_err(|e| {
+                HcError::Transform(format!(
+                    "hook Lua function '{}' not found: {e}",
+                    lua_block.function
+                ))
+            })?;
+
+        let result: mlua::Value = func
+            .call(())
+            .map_err(|e| HcError::Transform(format!("hook Lua call: {e}")))?;
+
+        match result {
+            mlua::Value::Nil => {}
+            mlua::Value::String(s) => {
+                let sql = s
+                    .to_str()
+                    .map_err(|e| HcError::Transform(e.to_string()))?
+                    .to_owned();
+                self.exec_statements(&sql).await?;
+            }
+            mlua::Value::Table(t) => {
+                for i in 1..=t.raw_len() {
+                    let val: mlua::Value =
+                        t.get(i).map_err(|e| HcError::Transform(e.to_string()))?;
+                    if let mlua::Value::String(s) = val {
+                        let sql = s
+                            .to_str()
+                            .map_err(|e| HcError::Transform(e.to_string()))?
+                            .to_owned();
+                        self.exec_statements(&sql).await?;
+                    }
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
     /// Run the startup hook SQL (if declared). Errors are fatal.
     pub async fn run_startup(&self) -> HcResult<()> {
         let Some(startup) = &self.config.aggregation.startup else {
             return Ok(());
         };
+        if let Some(lua_block) = &startup.lua {
+            self.exec_lua_prestep(lua_block).await?;
+        }
         let Some(sql) = &startup.sql else {
             return Ok(());
         };
@@ -99,6 +163,9 @@ impl HookRunner {
         let Some(reset) = &self.config.aggregation.reset else {
             return Ok(());
         };
+        if let Some(lua_block) = &reset.lua {
+            self.exec_lua_prestep(lua_block).await?;
+        }
         let Some(sql) = &reset.sql else {
             return Ok(());
         };

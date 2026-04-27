@@ -326,3 +326,52 @@ aggregation:
     assert!(cache.seen("trades", "R001"), "R001 must be in cache after reset");
     assert!(cache.seen("trades", "R002"), "R002 must be in cache after reset");
 }
+
+#[tokio::test]
+async fn test_startup_lua_prestep_runs_before_sql() {
+    let db = DbManager::open_in_memory().unwrap();
+
+    // The Lua pre-step creates pre_step_flag; the SQL step reads from it.
+    // If Lua didn't run first, the SQL would fail (table not found).
+    let cfg: hydrocube::config::CubeConfig = serde_yaml::from_str(
+        r#"
+name: test
+tables:
+  - name: trades
+    mode: append
+    schema:
+      columns:
+        - { name: book, type: VARCHAR }
+sources: []
+window: { interval_ms: 1000 }
+persistence: { enabled: false, path: ":memory:", flush_interval: 10 }
+aggregation:
+  key_columns: [book]
+  startup:
+    lua:
+      function: pre_step
+      inline: |
+        function pre_step()
+          return {
+            "CREATE TABLE IF NOT EXISTS pre_step_flag (done BOOLEAN)",
+            "INSERT INTO pre_step_flag VALUES (true)"
+          }
+        end
+    sql: "CREATE TABLE IF NOT EXISTS proof AS SELECT done FROM pre_step_flag"
+  publish:
+    sql: "SELECT book FROM trades GROUP BY book"
+"#,
+    )
+    .unwrap();
+
+    let runner = HookRunner::new(cfg, db.clone());
+    runner.run_startup().await.unwrap();
+
+    // If Lua ran before SQL, proof table exists with one row.
+    let rows = db
+        .query_json("SELECT COUNT(*) AS n FROM proof", vec![])
+        .await
+        .expect("proof table must exist (Lua ran before SQL)");
+    let n = rows[0]["n"].as_i64().unwrap_or(0);
+    assert_eq!(n, 1, "proof must have exactly one row from Lua pre-step");
+}
