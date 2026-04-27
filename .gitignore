@@ -20,3 +20,4 @@ Thumbs.db
 
 # Claude AI worktrees (project-specific)
 /.claude/worktrees/
+.worktrees/
