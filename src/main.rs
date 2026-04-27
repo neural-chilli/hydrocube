@@ -227,7 +227,9 @@ async fn main() {
         }
     }
 
-    // Drop our copy of raw_tx — channel closes when the last source task stops.
+    // Keep a clone for the HTTP ingest endpoint, then drop the original so the
+    // channel closes when all sources (and the web server) are done.
+    let web_ingest_tx = raw_tx.clone();
     drop(raw_tx);
 
     // Spawn hot path engine
@@ -263,7 +265,9 @@ async fn main() {
         let broadcast_tx_web = broadcast_tx.clone();
 
         tokio::spawn(async move {
-            if let Err(e) = start_server(db_web, config_web, broadcast_tx_web, port, None).await {
+            if let Err(e) =
+                start_server(db_web, config_web, broadcast_tx_web, port, Some(web_ingest_tx)).await
+            {
                 error!("Web server error: {}", e);
             }
         });

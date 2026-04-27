@@ -199,3 +199,30 @@ async fn test_http_ingest_invalid_json_returns_400() {
     let response = router.oneshot(request).await.unwrap();
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
+
+// ---------------------------------------------------------------------------
+// Test 6: channel delivery is the contract — message reaches the hot-path
+// receiver when ingest_tx is wired into AppState (proves main.rs must pass it)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_http_ingest_channel_reaches_hot_path() {
+    let (tx, mut rx) = mpsc::channel::<hydrocube::ingest::RawMessage>(16);
+    let state = make_state(Some(tx));
+    let router = build_router(state);
+
+    let request = Request::builder()
+        .method("POST")
+        .uri("/ingest/trades")
+        .header("content-type", "application/json")
+        .body(Body::from(r#"{"book":"A","notional":100.0}"#))
+        .unwrap();
+
+    let response = router.oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // The message MUST arrive on the channel — this is the contract main.rs
+    // must satisfy by passing the ingest sender to start_server.
+    let msg = rx.try_recv().expect("ingest message must reach the hot-path channel");
+    assert_eq!(msg.table, "trades");
+}
