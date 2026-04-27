@@ -1,5 +1,6 @@
 use hydrocube::db_manager::DbManager;
 use hydrocube::hooks::runner::HookRunner;
+use hydrocube::startup::run_startup_sequence;
 
 #[tokio::test]
 async fn test_hook_runner_resolves_static_file_paths() {
@@ -126,4 +127,40 @@ async fn test_publish_sql_is_expanded() {
         sql.contains("_window_id"),
         "publish SQL should have table expansion, got: {sql}"
     );
+}
+
+#[tokio::test]
+async fn test_startup_hook_called_during_engine_init() {
+    let db = DbManager::open_in_memory().unwrap();
+
+    let cfg: hydrocube::config::CubeConfig = serde_yaml::from_str(
+        r#"
+name: test
+tables:
+  - name: trades
+    mode: append
+    schema:
+      columns:
+        - { name: book, type: VARCHAR }
+        - { name: notional, type: DOUBLE }
+sources: []
+window: { interval_ms: 1000 }
+persistence: { enabled: false, path: ":memory:", flush_interval: 10 }
+aggregation:
+  key_columns: [book]
+  startup:
+    sql: "CREATE TABLE IF NOT EXISTS startup_marker (ran BOOLEAN)"
+  publish:
+    sql: "SELECT book, SUM(notional) AS total FROM trades GROUP BY book"
+"#,
+    )
+    .unwrap();
+
+    // Run the engine initialisation sequence — the same path main.rs calls.
+    run_startup_sequence(&db, &cfg).await.unwrap();
+
+    // The startup SQL should have created startup_marker; prove it by inserting.
+    db.execute("INSERT INTO startup_marker VALUES (true)", vec![])
+        .await
+        .expect("startup_marker table must exist after engine init");
 }

@@ -17,6 +17,7 @@ use hydrocube::error::exit_code;
 use hydrocube::persistence;
 use hydrocube::publish::DeltaEvent;
 use hydrocube::shutdown::shutdown_signal;
+use hydrocube::startup::run_startup_sequence;
 use hydrocube::web::server::start_server;
 
 #[tokio::main]
@@ -141,6 +142,17 @@ async fn main() {
             std::process::exit(exit_code::CONFIG_HASH_MISMATCH);
         }
     }
+
+    // -------------------------------------------------------------------------
+    // 9b. Run startup hook + pre-populate identity cache
+    // -------------------------------------------------------------------------
+    let _identity_cache = match run_startup_sequence(&db, &config).await {
+        Ok(c) => c,
+        Err(e) => {
+            error!("Startup sequence failed: {}", e);
+            std::process::exit(exit_code::PERSISTENCE_FAILURE);
+        }
+    };
 
     // -------------------------------------------------------------------------
     // 10. Restore window state from metadata

@@ -17,6 +17,7 @@ pub mod persistence;
 pub mod publish;
 pub mod retention;
 pub mod shutdown;
+pub mod startup;
 pub mod tables;
 pub mod transform;
 pub mod web;
