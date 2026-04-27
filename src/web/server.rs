@@ -19,6 +19,7 @@ use crate::config::CubeConfig;
 use crate::db_manager::DbManager;
 use crate::error::{HcError, HcResult};
 use crate::ingest::IngestSender;
+use crate::peers::PeerRegistry;
 use crate::publish::DeltaEvent;
 
 use super::api::{
@@ -96,6 +97,8 @@ pub async fn start_server(
     broadcast_tx: broadcast::Sender<DeltaEvent>,
     port: u16,
     ingest_tx: Option<IngestSender>,
+    peer_registry: Option<Arc<PeerRegistry>>,
+    http_client: reqwest::Client,
 ) -> HcResult<()> {
     // Pre-compute the snapshot SQL with synthetic _key column so the snapshot
     // endpoint returns the same schema as the engine's delta broadcasts.
@@ -110,8 +113,8 @@ pub async fn start_server(
         start_time: std::time::Instant::now(),
         broadcast_tx,
         ingest_tx,
-        peer_registry: None,
-        http_client: reqwest::Client::new(),
+        peer_registry,
+        http_client,
     });
 
     let router = Router::new()

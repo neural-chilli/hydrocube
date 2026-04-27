@@ -289,7 +289,7 @@ async fn main() {
 
         tokio::spawn(async move {
             if let Err(e) =
-                start_server(db_web, config_web, broadcast_tx_web, port, Some(web_ingest_tx)).await
+                start_server(db_web, config_web, broadcast_tx_web, port, Some(web_ingest_tx), None, reqwest::Client::new()).await
             {
                 error!("Web server error: {}", e);
             }
