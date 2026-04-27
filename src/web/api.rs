@@ -5,6 +5,26 @@
 use std::sync::Arc;
 use std::time::Instant;
 
+use governor::{DefaultDirectRateLimiter, Quota, RateLimiter};
+use std::num::NonZeroU32;
+
+pub type RateLimiters = std::collections::HashMap<String, DefaultDirectRateLimiter>;
+
+pub fn build_rate_limiters(config: &crate::config::CubeConfig) -> RateLimiters {
+    let mut map = RateLimiters::new();
+    for src in &config.sources {
+        if src.source_type == crate::config::SourceType::Http {
+            if let Some(rpm) = src.rate_limit_per_minute {
+                if let Some(nz) = NonZeroU32::new(rpm) {
+                    let quota = Quota::per_minute(nz);
+                    map.insert(src.table.clone(), RateLimiter::direct(quota));
+                }
+            }
+        }
+    }
+    map
+}
+
 use crate::aggregation::window::{compaction_cutoff, WINDOW_ID};
 use crate::config::CubeConfig;
 use crate::config::TableMode;
@@ -74,6 +94,8 @@ pub struct AppState {
     pub http_client: reqwest::Client,
     /// Per-table parse and schema error counters.
     pub error_counters: ErrorCounters,
+    /// Per-table rate limiters for HTTP ingest.
+    pub rate_limiters: Arc<RateLimiters>,
 }
 
 // ---------------------------------------------------------------------------

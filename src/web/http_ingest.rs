@@ -31,6 +31,16 @@ pub async fn http_ingest_handler(
     headers: HeaderMap,
     body: Bytes,
 ) -> impl IntoResponse {
+    if let Some(limiter) = state.rate_limiters.get(&table_name) {
+        if limiter.check().is_err() {
+            return (
+                StatusCode::TOO_MANY_REQUESTS,
+                Json(serde_json::json!({ "error": "rate limit exceeded" })),
+            )
+                .into_response();
+        }
+    }
+
     // Validate table exists
     if state.config.table(&table_name).is_none() {
         return (

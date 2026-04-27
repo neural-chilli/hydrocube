@@ -2,7 +2,8 @@ use axum::extract::{Path, State};
 use hydrocube::db_manager::DbManager;
 use hydrocube::publish::DeltaEvent;
 use hydrocube::web::api::{
-    drillthrough_handler, reaggregate_handler, status_handler, AppState, ErrorCounters,
+    build_rate_limiters, drillthrough_handler, reaggregate_handler, status_handler, AppState,
+    ErrorCounters,
 };
 use std::sync::Arc;
 use std::time::Instant;
@@ -10,6 +11,7 @@ use tokio::sync::broadcast;
 
 fn make_state(config: hydrocube::config::CubeConfig, db: DbManager) -> Arc<AppState> {
     let (broadcast_tx, _) = broadcast::channel::<DeltaEvent>(16);
+    let rate_limiters = Arc::new(build_rate_limiters(&config));
     Arc::new(AppState {
         db,
         snapshot_sql: "SELECT 1".to_owned(),
@@ -20,6 +22,7 @@ fn make_state(config: hydrocube::config::CubeConfig, db: DbManager) -> Arc<AppSt
         peer_registry: None,
         http_client: reqwest::Client::new(),
         error_counters: ErrorCounters::default(),
+        rate_limiters,
     })
 }
 
@@ -189,6 +192,7 @@ async fn test_get_peers_with_registry_returns_peer_list() {
         description: "Peer A".to_owned(),
         status: PeerStatus::Online,
     });
+    let rate_limiters = Arc::new(build_rate_limiters(&cfg));
     let state = Arc::new(AppState {
         db,
         snapshot_sql: "SELECT 1".to_owned(),
@@ -199,6 +203,7 @@ async fn test_get_peers_with_registry_returns_peer_list() {
         peer_registry: Some(Arc::new(registry)),
         http_client: reqwest::Client::new(),
         error_counters: ErrorCounters::default(),
+        rate_limiters,
     });
     let result = get_peers_handler(State(state)).await;
     let response = axum::response::IntoResponse::into_response(result);
@@ -226,6 +231,7 @@ async fn test_register_peer_adds_to_registry() {
         status: PeerStatus::Online,
     };
     let registry = Arc::new(PeerRegistry::new(own));
+    let rate_limiters = Arc::new(build_rate_limiters(&cfg));
     let state = Arc::new(AppState {
         db,
         snapshot_sql: "SELECT 1".to_owned(),
@@ -236,6 +242,7 @@ async fn test_register_peer_adds_to_registry() {
         peer_registry: Some(registry.clone()),
         http_client: reqwest::Client::new(),
         error_counters: ErrorCounters::default(),
+        rate_limiters,
     });
     let body = hydrocube::web::api::RegisterPeerRequest {
         name: "peer-b".to_owned(),
@@ -266,6 +273,7 @@ async fn test_status_exposes_parse_error_counters() {
         .or_insert_with(|| AtomicU64::new(0))
         .fetch_add(3, Ordering::Relaxed);
 
+    let rate_limiters = Arc::new(build_rate_limiters(&cfg));
     let state = Arc::new(AppState {
         db,
         snapshot_sql: "SELECT 1".to_owned(),
@@ -276,6 +284,7 @@ async fn test_status_exposes_parse_error_counters() {
         peer_registry: None,
         http_client: reqwest::Client::new(),
         error_counters,
+        rate_limiters,
     });
 
     let result = status_handler(State(state)).await;

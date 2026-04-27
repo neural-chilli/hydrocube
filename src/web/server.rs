@@ -23,9 +23,9 @@ use crate::peers::PeerRegistry;
 use crate::publish::DeltaEvent;
 
 use super::api::{
-    drillthrough_handler, get_peers_handler, query_handler, reaggregate_handler,
-    register_peer_handler, schema_handler, snapshot_handler, status_handler, AppState,
-    ErrorCounters,
+    build_rate_limiters, drillthrough_handler, get_peers_handler, query_handler,
+    reaggregate_handler, register_peer_handler, schema_handler, snapshot_handler, status_handler,
+    AppState, ErrorCounters,
 };
 use super::assets::static_handler;
 use super::http_ingest::http_ingest_handler;
@@ -108,6 +108,8 @@ pub async fn start_server(
         .map(|g| g.full_aggregation_sql_with_key())
         .unwrap_or_else(|_| config.aggregation.publish.sql.clone());
 
+    let rate_limiters = Arc::new(build_rate_limiters(&config));
+
     let state = Arc::new(AppState {
         db,
         config,
@@ -118,6 +120,7 @@ pub async fn start_server(
         peer_registry,
         http_client,
         error_counters,
+        rate_limiters,
     });
 
     let router = Router::new()
