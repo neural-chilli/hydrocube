@@ -336,7 +336,11 @@ pub async fn get_peers_handler(State(state): State<Arc<AppState>>) -> impl IntoR
                 description: state.config.description.clone().unwrap_or_default(),
                 status: PeerStatus::Online,
             };
-            Json(GetPeersResponse { self_info, peers: vec![] }).into_response()
+            Json(GetPeersResponse {
+                self_info,
+                peers: vec![],
+            })
+            .into_response()
         }
         Some(registry) => {
             let self_info = registry.own_info();
@@ -392,8 +396,14 @@ pub async fn register_peer_handler(
             let description = body.description.clone();
             tokio::spawn(async move {
                 for target_base in forward_targets {
-                    let forward_url = format!("{}/api/peers/register", target_base.trim_end_matches('/'));
-                    let fw = ForwardBody { name: &name, url: &url, description: &description, forwarded: true };
+                    let forward_url =
+                        format!("{}/api/peers/register", target_base.trim_end_matches('/'));
+                    let fw = ForwardBody {
+                        name: &name,
+                        url: &url,
+                        description: &description,
+                        forwarded: true,
+                    };
                     if let Err(e) = client.post(&forward_url).json(&fw).send().await {
                         tracing::warn!(target: "hydrocube::peers", "Failed to forward registration to {}: {}", target_base, e);
                     }

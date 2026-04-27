@@ -146,8 +146,8 @@ async fn test_get_peers_no_registry_returns_self_with_empty_peers() {
 
 #[tokio::test]
 async fn test_register_peer_no_registry_returns_empty_list() {
-    use hydrocube::web::api::register_peer_handler;
     use axum::Json;
+    use hydrocube::web::api::register_peer_handler;
     let db = DbManager::open_in_memory().unwrap();
     let state = make_state(trades_config(), db);
     let body = hydrocube::web::api::RegisterPeerRequest {
@@ -209,9 +209,9 @@ async fn test_get_peers_with_registry_returns_peer_list() {
 
 #[tokio::test]
 async fn test_register_peer_adds_to_registry() {
+    use axum::Json;
     use hydrocube::peers::{PeerRecord, PeerRegistry, PeerStatus};
     use hydrocube::web::api::register_peer_handler;
-    use axum::Json;
     let db = DbManager::open_in_memory().unwrap();
     let cfg = trades_config();
     let (broadcast_tx, _) = broadcast::channel::<DeltaEvent>(16);

@@ -214,7 +214,10 @@ aggregation:
         .await
         .expect("snap_ran must exist after cron fires");
     let n = rows[0]["n"].as_i64().unwrap_or(0);
-    assert!(n >= 1, "snapshot cron must have fired at least once, got {n}");
+    assert!(
+        n >= 1,
+        "snapshot cron must have fired at least once, got {n}"
+    );
 }
 
 #[tokio::test]
@@ -265,7 +268,10 @@ aggregation:
         .await
         .expect("hk_ran must exist after housekeeping cron fires");
     let n = rows[0]["n"].as_i64().unwrap_or(0);
-    assert!(n >= 1, "housekeeping cron must have fired at least once, got {n}");
+    assert!(
+        n >= 1,
+        "housekeeping cron must have fired at least once, got {n}"
+    );
 }
 
 #[tokio::test]
@@ -323,8 +329,14 @@ aggregation:
         .expect("reset_marker must exist after reset sequence");
 
     // Identity cache must be repopulated from post-reset DB state.
-    assert!(cache.seen("trades", "R001"), "R001 must be in cache after reset");
-    assert!(cache.seen("trades", "R002"), "R002 must be in cache after reset");
+    assert!(
+        cache.seen("trades", "R001"),
+        "R001 must be in cache after reset"
+    );
+    assert!(
+        cache.seen("trades", "R002"),
+        "R002 must be in cache after reset"
+    );
 }
 
 #[tokio::test]

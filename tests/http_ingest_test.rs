@@ -225,6 +225,8 @@ async fn test_http_ingest_channel_reaches_hot_path() {
 
     // The message MUST arrive on the channel — this is the contract main.rs
     // must satisfy by passing the ingest sender to start_server.
-    let msg = rx.try_recv().expect("ingest message must reach the hot-path channel");
+    let msg = rx
+        .try_recv()
+        .expect("ingest message must reach the hot-path channel");
     assert_eq!(msg.table, "trades");
 }

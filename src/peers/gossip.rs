@@ -42,22 +42,20 @@ pub async fn bootstrap(
             .send()
             .await
         {
-            Ok(resp) if resp.status().is_success() => {
-                match resp.json::<GetPeersResponse>().await {
-                    Ok(body) => {
-                        registry.upsert(body.self_info);
-                        for peer in body.peers {
-                            if peer.url != own_info.url {
-                                registry.upsert(peer);
-                            }
+            Ok(resp) if resp.status().is_success() => match resp.json::<GetPeersResponse>().await {
+                Ok(body) => {
+                    registry.upsert(body.self_info);
+                    for peer in body.peers {
+                        if peer.url != own_info.url {
+                            registry.upsert(peer);
                         }
-                        info!(target: "hydrocube::peers", "Fetched peer list from seed {}", seed_url);
                     }
-                    Err(e) => {
-                        warn!(target: "hydrocube::peers", "Could not parse peers response from {}: {}", seed_url, e);
-                    }
+                    info!(target: "hydrocube::peers", "Fetched peer list from seed {}", seed_url);
                 }
-            }
+                Err(e) => {
+                    warn!(target: "hydrocube::peers", "Could not parse peers response from {}: {}", seed_url, e);
+                }
+            },
             Ok(resp) => {
                 warn!(target: "hydrocube::peers", "Seed {} returned HTTP {} for GET /api/peers", seed_url, resp.status());
             }

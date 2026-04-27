@@ -23,8 +23,8 @@ use crate::peers::PeerRegistry;
 use crate::publish::DeltaEvent;
 
 use super::api::{
-    drillthrough_handler, get_peers_handler, query_handler, reaggregate_handler, register_peer_handler,
-    schema_handler, snapshot_handler, status_handler, AppState,
+    drillthrough_handler, get_peers_handler, query_handler, reaggregate_handler,
+    register_peer_handler, schema_handler, snapshot_handler, status_handler, AppState,
 };
 use super::assets::static_handler;
 use super::http_ingest::http_ingest_handler;

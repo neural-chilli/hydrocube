@@ -61,9 +61,7 @@ impl HookRunner {
             .inline
             .as_deref()
             .or(lua_block.script.as_deref())
-            .ok_or_else(|| {
-                HcError::Config("hook lua block needs inline or script".into())
-            })?;
+            .ok_or_else(|| HcError::Config("hook lua block needs inline or script".into()))?;
 
         let lua = Lua::new();
         lua.load(lua_code)

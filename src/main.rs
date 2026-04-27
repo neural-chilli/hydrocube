@@ -15,12 +15,12 @@ use hydrocube::config::CubeConfig;
 use hydrocube::db_manager::DbManager;
 use hydrocube::error::exit_code;
 use hydrocube::hooks::cron::{spawn_housekeeping_cron_tasks, spawn_snapshot_cron_tasks};
+use hydrocube::peers::gossip;
+use hydrocube::peers::{PeerRecord, PeerRegistry, PeerStatus};
 use hydrocube::persistence;
 use hydrocube::publish::DeltaEvent;
 use hydrocube::shutdown::shutdown_signal;
 use hydrocube::startup::{run_reset_sequence, run_startup_sequence};
-use hydrocube::peers::gossip;
-use hydrocube::peers::{PeerRecord, PeerRegistry, PeerStatus};
 use hydrocube::web::server::start_server;
 use std::sync::Arc;
 
@@ -220,7 +220,13 @@ async fn main() {
             let bootstrap_cfg = peers_cfg.clone();
             let bootstrap_client = http_client.clone();
             tokio::spawn(async move {
-                gossip::bootstrap(&own_info, &bootstrap_cfg, &bootstrap_registry, &bootstrap_client).await;
+                gossip::bootstrap(
+                    &own_info,
+                    &bootstrap_cfg,
+                    &bootstrap_registry,
+                    &bootstrap_client,
+                )
+                .await;
             });
         }
 
@@ -341,8 +347,16 @@ async fn main() {
         let http_client_web = http_client.clone();
 
         tokio::spawn(async move {
-            if let Err(e) =
-                start_server(db_web, config_web, broadcast_tx_web, port, Some(web_ingest_tx), peer_registry_web, http_client_web).await
+            if let Err(e) = start_server(
+                db_web,
+                config_web,
+                broadcast_tx_web,
+                port,
+                Some(web_ingest_tx),
+                peer_registry_web,
+                http_client_web,
+            )
+            .await
             {
                 error!("Web server error: {}", e);
             }

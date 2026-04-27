@@ -57,7 +57,8 @@ pub fn spawn_snapshot_cron_tasks(
             Some(spawn_cron_task(
                 schedule,
                 move |_| {
-                    let runner = crate::hooks::runner::HookRunner::new(cfg.clone(), db_clone.clone());
+                    let runner =
+                        crate::hooks::runner::HookRunner::new(cfg.clone(), db_clone.clone());
                     let n = name.clone();
                     async move {
                         if let Err(e) = runner.run_snapshot(&n).await {
@@ -94,7 +95,8 @@ pub fn spawn_housekeeping_cron_tasks(
             Some(spawn_cron_task(
                 schedule,
                 move |_| {
-                    let runner = crate::hooks::runner::HookRunner::new(cfg.clone(), db_clone.clone());
+                    let runner =
+                        crate::hooks::runner::HookRunner::new(cfg.clone(), db_clone.clone());
                     let n = job_name.clone();
                     async move {
                         if let Err(e) = runner.run_housekeeping(&n).await {

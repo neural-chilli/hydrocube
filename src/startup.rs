@@ -25,8 +25,7 @@ pub async fn run_startup_sequence(
     let mut cache = MultiTableIdentityCache::new();
     for source in &config.sources {
         if let Some(identity_key) = &source.identity_key {
-            let keys =
-                populate_identity_cache_from_db(db, &source.table, identity_key).await?;
+            let keys = populate_identity_cache_from_db(db, &source.table, identity_key).await?;
             cache.populate(&source.table, keys);
         }
     }
@@ -46,8 +45,7 @@ pub async fn run_reset_sequence(
     let mut cache = MultiTableIdentityCache::new();
     for source in &config.sources {
         if let Some(identity_key) = &source.identity_key {
-            let keys =
-                populate_identity_cache_from_db(db, &source.table, identity_key).await?;
+            let keys = populate_identity_cache_from_db(db, &source.table, identity_key).await?;
             cache.populate(&source.table, keys);
         }
     }
