@@ -72,6 +72,17 @@ pub fn parse_rows_for_table(
                 table_cfg.name
             )))
         }
+        DataFormat::Protobuf => {
+            if let Some(map) = decoders {
+                if let Some(CompiledDecoder::Protobuf(dec)) = map.get(&table_cfg.name) {
+                    return dec.decode(bytes);
+                }
+            }
+            Err(HcError::Ingest(format!(
+                "no Protobuf decoder compiled for table '{}'",
+                table_cfg.name
+            )))
+        }
         _ => Err(HcError::Ingest(format!(
             "format {:?} not yet supported for streaming messages",
             format

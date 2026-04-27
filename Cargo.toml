@@ -56,6 +56,11 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 # Avro
 apache-avro = "0.17"
 
+# Protobuf (pure-Rust, no protoc binary needed)
+protobuf = "3"
+protobuf-parse = "3"
+tempfile = "3"
+
 # Misc
 csv = "1"
 base64 = "0.22"

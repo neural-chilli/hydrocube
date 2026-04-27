@@ -3,6 +3,7 @@ pub mod avro;
 pub mod file;
 pub mod nats;
 pub mod parser;
+pub mod protobuf;
 
 #[cfg(feature = "kafka")]
 pub mod kafka;
@@ -42,6 +43,7 @@ use std::collections::HashMap;
 
 pub enum CompiledDecoder {
     Avro(avro::AvroDecoder),
+    Protobuf(protobuf::ProtobufDecoder),
 }
 
 pub type CompiledDecoderMap = HashMap<String, CompiledDecoder>;
@@ -59,6 +61,23 @@ pub fn build_decoder_map(
             if let Some(table_cfg) = config.table(&src.table) {
                 let decoder = avro::AvroDecoder::new(schema_json, &table_cfg.schema.columns)?;
                 map.insert(src.table.clone(), CompiledDecoder::Avro(decoder));
+            }
+        } else if src.format == crate::config::DataFormat::Protobuf {
+            let proto_schema = src
+                .proto_schema
+                .as_deref()
+                .expect("validated before this point");
+            let message_type = src
+                .proto_message
+                .as_deref()
+                .expect("validated before this point");
+            if let Some(table_cfg) = config.table(&src.table) {
+                let decoder = protobuf::ProtobufDecoder::new(
+                    proto_schema,
+                    message_type,
+                    &table_cfg.schema.columns,
+                )?;
+                map.insert(src.table.clone(), CompiledDecoder::Protobuf(decoder));
             }
         }
     }
