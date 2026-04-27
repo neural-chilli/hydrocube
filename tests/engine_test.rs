@@ -148,3 +148,62 @@ async fn test_hot_path_processes_messages() {
     let _ = shutdown_tx.send(true);
     let _ = handle.await;
 }
+
+#[tokio::test]
+async fn test_schema_errors_incremented_for_unknown_table() {
+    let db = DbManager::open_in_memory().unwrap();
+    let config = test_config();
+
+    persistence::init(&db, &config).await.unwrap();
+    persistence::init_tables(&db, &config.tables).await.unwrap();
+
+    let (raw_tx, raw_rx) = mpsc::channel::<RawMessage>(100);
+    let (broadcast_tx, _broadcast_rx) = broadcast::channel::<DeltaEvent>(100);
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
+
+    let error_counters = ErrorCounters::new();
+    let counters_clone = error_counters.clone();
+
+    let engine_db = db.clone();
+    let engine_config = config.clone();
+    let handle = tokio::spawn(async move {
+        run_hot_path(
+            engine_db,
+            engine_config,
+            raw_rx,
+            broadcast_tx,
+            shutdown_rx,
+            error_counters,
+        )
+        .await
+    });
+
+    // Send a message for a table that does not exist in the config.
+    raw_tx
+        .send(RawMessage {
+            table: "unknown_table".to_owned(),
+            bytes: b"{}".to_vec(),
+            format: DataFormat::Json,
+        })
+        .await
+        .unwrap();
+
+    // Give the engine a moment to process the message.
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // Shut down cleanly before asserting.
+    let _ = shutdown_tx.send(true);
+    let _ = handle.await;
+
+    use std::sync::atomic::Ordering;
+    let count = counters_clone
+        .schema_errors
+        .get("unknown_table")
+        .map(|e| e.value().load(Ordering::Relaxed))
+        .unwrap_or(0);
+    assert!(
+        count > 0,
+        "schema_errors[\"unknown_table\"] should be > 0 after a message for an unknown table, got {}",
+        count
+    );
+}

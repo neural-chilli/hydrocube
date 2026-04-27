@@ -207,6 +207,7 @@ pub async fn run_hot_path(
                                 "Unknown table: {}",
                                 raw_msg.table
                             );
+                            error_counters.inc_schema(&raw_msg.table);
                         }
                     }
                     None => {
