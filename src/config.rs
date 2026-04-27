@@ -28,6 +28,8 @@ pub struct CubeConfig {
     pub publish: Option<NatsPublishOutConfig>,
     #[serde(default)]
     pub auth: Option<AuthConfig>,
+    #[serde(default)]
+    pub peers: Option<PeersConfig>,
     #[serde(default = "default_log_level")]
     pub log_level: String,
 }
@@ -352,6 +354,27 @@ pub struct AuthConfig {
     pub username: Option<String>,
     #[serde(default)]
     pub password: Option<String>,
+}
+
+// ── Peers ─────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct PeersConfig {
+    pub url: String,
+    pub description: String,
+    #[serde(default)]
+    pub seeds: Vec<String>,
+    #[serde(default = "default_health_check_interval")]
+    pub health_check_interval_secs: u64,
+    #[serde(default = "default_health_check_failures")]
+    pub health_check_failures_before_offline: u32,
+}
+
+fn default_health_check_interval() -> u64 {
+    30
+}
+fn default_health_check_failures() -> u32 {
+    3
 }
 
 // ── Helper methods ────────────────────────────────────────────────────────────

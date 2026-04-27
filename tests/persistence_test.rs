@@ -65,6 +65,7 @@ fn test_config() -> CubeConfig {
         },
         publish: None,
         auth: None,
+        peers: None,
         log_level: "info".into(),
     }
 }
