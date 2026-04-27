@@ -36,8 +36,10 @@ fn file_reader_expr(path: &str, format: DataFormat) -> String {
         DataFormat::Csv => format!("read_csv_auto('{path}')"),
         DataFormat::Json => format!("read_json_auto('{path}')"),
         DataFormat::JsonLines => {
-            // DuckDB reads JSON Lines via read_json_auto with format='newline_delimited'
             format!("read_json_auto('{path}', format='newline_delimited')")
+        }
+        DataFormat::Avro | DataFormat::Protobuf => {
+            format!("read_json_auto('{path}')")
         }
     }
 }

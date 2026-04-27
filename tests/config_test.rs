@@ -232,3 +232,204 @@ fn test_schema_hash_stable_when_window_changes() {
     let cfg2: CubeConfig = serde_yaml::from_str(&yaml2).unwrap();
     assert_eq!(cfg1.schema_hash(), cfg2.schema_hash());
 }
+
+#[test]
+fn test_source_config_parses_avro_schema() {
+    use hydrocube::config::{CubeConfig, DataFormat};
+    let yaml = r#"
+name: test
+tables:
+  - name: trades
+    mode: append
+    schema:
+      columns:
+        - { name: trade_id, type: VARCHAR }
+sources:
+  - type: kafka
+    topic: trades
+    table: trades
+    format: avro
+    avro_schema: '{"type":"record","name":"Trade","fields":[{"name":"trade_id","type":"string"}]}'
+window: { interval_ms: 1000 }
+persistence: { path: ":memory:", flush_interval: 10 }
+aggregation:
+  key_columns: [trade_id]
+  publish:
+    sql: "SELECT trade_id FROM trades"
+"#;
+    let config: CubeConfig = serde_yaml::from_str(yaml).unwrap();
+    assert_eq!(config.sources[0].format, DataFormat::Avro);
+    assert!(config.sources[0].avro_schema.is_some());
+}
+
+#[test]
+fn test_source_config_parses_protobuf_fields() {
+    use hydrocube::config::{CubeConfig, DataFormat};
+    let yaml = r#"
+name: test
+tables:
+  - name: rates
+    mode: replace
+    key_columns: [curve]
+    schema:
+      columns:
+        - { name: curve, type: VARCHAR }
+sources:
+  - type: kafka
+    topic: rates
+    table: rates
+    format: protobuf
+    proto_schema: |
+      syntax = "proto3";
+      message RateUpdate { string curve = 1; }
+    proto_message: RateUpdate
+window: { interval_ms: 1000 }
+persistence: { path: ":memory:", flush_interval: 10 }
+aggregation:
+  key_columns: [curve]
+  publish:
+    sql: "SELECT curve FROM rates"
+"#;
+    let config: CubeConfig = serde_yaml::from_str(yaml).unwrap();
+    assert_eq!(config.sources[0].format, DataFormat::Protobuf);
+    assert!(config.sources[0].proto_schema.is_some());
+    assert_eq!(
+        config.sources[0].proto_message.as_deref(),
+        Some("RateUpdate")
+    );
+}
+
+#[test]
+fn test_refresh_strategy_startup_parses() {
+    use hydrocube::config::CubeConfig;
+    let yaml = r#"
+name: test
+tables:
+  - name: instruments
+    mode: reference
+    schema:
+      columns:
+        - { name: instrument_id, type: VARCHAR }
+sources:
+  - type: file
+    path: /data/instruments.csv
+    table: instruments
+    format: csv
+    refresh: startup
+window: { interval_ms: 1000 }
+persistence: { path: ":memory:", flush_interval: 10 }
+aggregation:
+  key_columns: [instrument_id]
+  publish:
+    sql: "SELECT instrument_id FROM instruments"
+"#;
+    let config: CubeConfig = serde_yaml::from_str(yaml).unwrap();
+    assert!(config.sources[0]
+        .refresh
+        .as_ref()
+        .map(|r| r.is_startup())
+        .unwrap_or(false));
+}
+
+#[test]
+fn test_refresh_strategy_interval_parses() {
+    use hydrocube::config::CubeConfig;
+    let yaml = r#"
+name: test
+tables:
+  - name: instruments
+    mode: reference
+    schema:
+      columns:
+        - { name: instrument_id, type: VARCHAR }
+sources:
+  - type: file
+    path: /data/instruments.csv
+    table: instruments
+    format: csv
+    refresh:
+      interval: 1h
+window: { interval_ms: 1000 }
+persistence: { path: ":memory:", flush_interval: 10 }
+aggregation:
+  key_columns: [instrument_id]
+  publish:
+    sql: "SELECT instrument_id FROM instruments"
+"#;
+    let config: CubeConfig = serde_yaml::from_str(yaml).unwrap();
+    assert!(config.sources[0]
+        .refresh
+        .as_ref()
+        .map(|r| r.interval_str().is_some())
+        .unwrap_or(false));
+}
+
+#[test]
+fn test_validate_rejects_avro_source_without_schema() {
+    use hydrocube::config::CubeConfig;
+    let yaml = r#"
+name: test
+tables:
+  - name: trades
+    mode: append
+    schema:
+      columns:
+        - { name: trade_id, type: VARCHAR }
+sources:
+  - type: kafka
+    topic: trades
+    table: trades
+    format: avro
+window: { interval_ms: 1000 }
+persistence: { path: ":memory:", flush_interval: 10 }
+aggregation:
+  key_columns: [trade_id]
+  publish:
+    sql: "SELECT trade_id FROM trades"
+"#;
+    let config: CubeConfig = serde_yaml::from_str(yaml).unwrap();
+    let result = config.validate();
+    assert!(result.is_err());
+    let msg = result.unwrap_err().to_string();
+    assert!(
+        msg.contains("avro_schema"),
+        "expected avro_schema error, got: {msg}"
+    );
+}
+
+#[test]
+fn test_validate_rejects_protobuf_source_without_proto_message() {
+    use hydrocube::config::CubeConfig;
+    let yaml = r#"
+name: test
+tables:
+  - name: rates
+    mode: replace
+    key_columns: [curve]
+    schema:
+      columns:
+        - { name: curve, type: VARCHAR }
+sources:
+  - type: kafka
+    topic: rates
+    table: rates
+    format: protobuf
+    proto_schema: |
+      syntax = "proto3";
+      message RateUpdate { string curve = 1; }
+window: { interval_ms: 1000 }
+persistence: { path: ":memory:", flush_interval: 10 }
+aggregation:
+  key_columns: [curve]
+  publish:
+    sql: "SELECT curve FROM rates"
+"#;
+    let config: CubeConfig = serde_yaml::from_str(yaml).unwrap();
+    let result = config.validate();
+    assert!(result.is_err());
+    let msg = result.unwrap_err().to_string();
+    assert!(
+        msg.contains("proto_message"),
+        "expected proto_message error, got: {msg}"
+    );
+}

@@ -118,6 +118,20 @@ pub struct SourceConfig {
     pub transform: Option<Vec<TransformStep>>,
     #[serde(default)]
     pub identity_key: Option<String>,
+    // Avro format
+    #[serde(default)]
+    pub avro_schema: Option<String>,
+    // Protobuf format
+    #[serde(default)]
+    pub proto_schema: Option<String>,
+    #[serde(default)]
+    pub proto_message: Option<String>,
+    // Reference table refresh
+    #[serde(default)]
+    pub refresh: Option<RefreshStrategy>,
+    // HTTP ingest rate limiting (requests per minute; 0 = unlimited)
+    #[serde(default)]
+    pub rate_limit_per_minute: Option<u32>,
 }
 
 fn default_format() -> DataFormat {
@@ -140,6 +154,8 @@ pub enum DataFormat {
     Csv,
     Parquet,
     JsonLines,
+    Avro,
+    Protobuf,
 }
 
 #[derive(Debug, Deserialize, Clone, PartialEq)]
@@ -147,6 +163,28 @@ pub enum DataFormat {
 pub enum LoadTiming {
     Startup,
     Reset,
+}
+
+#[derive(Debug, Deserialize, Clone, PartialEq)]
+#[serde(untagged)]
+pub enum RefreshStrategy {
+    Interval { interval: String },
+    Named(String),
+}
+
+impl RefreshStrategy {
+    pub fn is_startup(&self) -> bool {
+        matches!(self, RefreshStrategy::Named(s) if s == "startup")
+    }
+    pub fn is_watch(&self) -> bool {
+        matches!(self, RefreshStrategy::Named(s) if s == "watch")
+    }
+    pub fn interval_str(&self) -> Option<&str> {
+        match self {
+            RefreshStrategy::Interval { interval } => Some(interval.as_str()),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize, Clone, PartialEq)]
@@ -272,9 +310,14 @@ pub struct WindowConfig {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct PersistenceConfig {
+    #[serde(default = "default_persistence_enabled")]
     pub enabled: bool,
     pub path: String,
     pub flush_interval: u64,
+}
+
+fn default_persistence_enabled() -> bool {
+    true
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -467,6 +510,26 @@ impl CubeConfig {
                         "source batch_wait_ms ({}) must not exceed window.interval_ms/2 ({})",
                         batch_wait,
                         self.window.interval_ms / 2
+                    )));
+                }
+            }
+            if src.format == DataFormat::Avro && src.avro_schema.is_none() {
+                return Err(HcError::Config(format!(
+                    "source targeting table '{}' uses format=avro but missing avro_schema",
+                    src.table
+                )));
+            }
+            if src.format == DataFormat::Protobuf {
+                if src.proto_schema.is_none() {
+                    return Err(HcError::Config(format!(
+                        "source targeting table '{}' uses format=protobuf but missing proto_schema",
+                        src.table
+                    )));
+                }
+                if src.proto_message.is_none() {
+                    return Err(HcError::Config(format!(
+                        "source targeting table '{}' uses format=protobuf but missing proto_message",
+                        src.table
                     )));
                 }
             }
