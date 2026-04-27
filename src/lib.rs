@@ -13,6 +13,7 @@ pub mod error;
 pub mod hooks;
 pub mod identity;
 pub mod ingest;
+pub mod peers;
 pub mod persistence;
 pub mod publish;
 pub mod retention;

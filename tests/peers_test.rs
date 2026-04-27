@@ -1,4 +1,14 @@
 use hydrocube::config::{CubeConfig, PeersConfig};
+use hydrocube::peers::{PeerRecord, PeerRegistry, PeerStatus};
+
+fn make_record(name: &str, url: &str) -> PeerRecord {
+    PeerRecord {
+        name: name.into(),
+        url: url.into(),
+        description: format!("{} desc", name),
+        status: PeerStatus::Online,
+    }
+}
 
 #[test]
 fn peers_config_deserializes_with_defaults() {
@@ -47,4 +57,71 @@ aggregation:
 "#;
     let config: CubeConfig = serde_yaml::from_str(yaml).unwrap();
     assert!(config.peers.is_none());
+}
+
+#[test]
+fn registry_upsert_and_list() {
+    let registry = PeerRegistry::new(make_record("self", "http://localhost:8080"));
+    registry.upsert(make_record("peer_a", "http://cube-a:8080"));
+    registry.upsert(make_record("peer_b", "http://cube-b:8080"));
+
+    let peers = registry.list();
+    assert_eq!(peers.len(), 2);
+    assert!(peers.iter().any(|p| p.url == "http://cube-a:8080"));
+    assert!(peers.iter().any(|p| p.url == "http://cube-b:8080"));
+}
+
+#[test]
+fn registry_upsert_is_idempotent() {
+    let registry = PeerRegistry::new(make_record("self", "http://localhost:8080"));
+    let peer = make_record("peer_a", "http://cube-a:8080");
+    registry.upsert(peer.clone());
+    registry.upsert(peer.clone());
+    assert_eq!(registry.list().len(), 1);
+}
+
+#[test]
+fn registry_upsert_ignores_own_url() {
+    let registry = PeerRegistry::new(make_record("self", "http://localhost:8080"));
+    registry.upsert(make_record("self_alias", "http://localhost:8080"));
+    assert_eq!(registry.list().len(), 0);
+}
+
+#[test]
+fn registry_record_failure_marks_offline_after_threshold() {
+    let registry = PeerRegistry::new(make_record("self", "http://localhost:8080"));
+    registry.upsert(make_record("peer_a", "http://cube-a:8080"));
+
+    // Two failures — still online (threshold is 3).
+    registry.record_failure("http://cube-a:8080", 3);
+    registry.record_failure("http://cube-a:8080", 3);
+    assert_eq!(registry.list()[0].status, PeerStatus::Online);
+
+    // Third failure — now offline.
+    registry.record_failure("http://cube-a:8080", 3);
+    assert_eq!(registry.list()[0].status, PeerStatus::Offline);
+}
+
+#[test]
+fn registry_record_success_resets_to_online() {
+    let registry = PeerRegistry::new(make_record("self", "http://localhost:8080"));
+    registry.upsert(make_record("peer_a", "http://cube-a:8080"));
+
+    registry.record_failure("http://cube-a:8080", 1);
+    assert_eq!(registry.list()[0].status, PeerStatus::Offline);
+
+    registry.record_success("http://cube-a:8080");
+    assert_eq!(registry.list()[0].status, PeerStatus::Online);
+}
+
+#[test]
+fn registry_peer_urls_except_excludes_given_url() {
+    let registry = PeerRegistry::new(make_record("self", "http://localhost:8080"));
+    registry.upsert(make_record("a", "http://cube-a:8080"));
+    registry.upsert(make_record("b", "http://cube-b:8080"));
+    registry.upsert(make_record("c", "http://cube-c:8080"));
+
+    let urls = registry.peer_urls_except("http://cube-b:8080");
+    assert_eq!(urls.len(), 2);
+    assert!(!urls.contains(&"http://cube-b:8080".to_string()));
 }
