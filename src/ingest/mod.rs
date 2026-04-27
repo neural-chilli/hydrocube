@@ -4,6 +4,7 @@ pub mod file;
 pub mod nats;
 pub mod parser;
 pub mod protobuf;
+pub mod reference;
 
 #[cfg(feature = "kafka")]
 pub mod kafka;

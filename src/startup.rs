@@ -22,6 +22,8 @@ pub async fn run_startup_sequence(
     let runner = HookRunner::new(config.clone(), db.clone());
     runner.run_startup().await?;
 
+    crate::ingest::reference::load_reference_tables_at_startup(db, config).await?;
+
     let mut cache = MultiTableIdentityCache::new();
     for source in &config.sources {
         if let Some(identity_key) = &source.identity_key {
