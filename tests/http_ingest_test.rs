@@ -12,7 +12,7 @@ use axum::Router;
 use hydrocube::config::CubeConfig;
 use hydrocube::db_manager::DbManager;
 use hydrocube::publish::DeltaEvent;
-use hydrocube::web::api::AppState;
+use hydrocube::web::api::{AppState, ErrorCounters};
 use hydrocube::web::http_ingest::http_ingest_handler;
 use tokio::sync::{broadcast, mpsc};
 use tower::ServiceExt;
@@ -52,6 +52,7 @@ fn make_state(ingest_tx: Option<hydrocube::ingest::IngestSender>) -> Arc<AppStat
         ingest_tx,
         peer_registry: None,
         http_client: reqwest::Client::new(),
+        error_counters: ErrorCounters::default(),
     })
 }
 

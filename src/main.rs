@@ -265,6 +265,7 @@ async fn main() {
     // -------------------------------------------------------------------------
     // 13b. Raw message channel for ingest → engine
     // -------------------------------------------------------------------------
+    let error_counters = hydrocube::web::api::ErrorCounters::new();
     let (raw_tx, raw_rx) = tokio::sync::mpsc::channel::<hydrocube::ingest::RawMessage>(10_000);
 
     // Spawn one KafkaSource task per kafka-type source in the config.
@@ -311,6 +312,7 @@ async fn main() {
     let engine_config = config.clone();
     let engine_broadcast = broadcast_tx.clone();
     let engine_shutdown = shutdown_rx.clone();
+    let engine_error_counters = error_counters.clone();
     tokio::spawn(async move {
         if let Err(e) = hydrocube::engine::run_hot_path(
             engine_db,
@@ -318,6 +320,7 @@ async fn main() {
             raw_rx,
             engine_broadcast,
             engine_shutdown,
+            engine_error_counters,
         )
         .await
         {
@@ -376,6 +379,7 @@ async fn main() {
         let broadcast_tx_web = broadcast_tx.clone();
         let peer_registry_web = peer_registry.clone();
         let http_client_web = http_client.clone();
+        let web_error_counters = error_counters.clone();
 
         tokio::spawn(async move {
             if let Err(e) = start_server(
@@ -386,6 +390,7 @@ async fn main() {
                 Some(web_ingest_tx),
                 peer_registry_web,
                 http_client_web,
+                web_error_counters,
             )
             .await
             {

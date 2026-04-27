@@ -22,6 +22,7 @@ use crate::publish::{batch_to_base64_arrow, DeltaEvent};
 use crate::tables::TableBuffer;
 use crate::transform::sql::value_to_sql;
 use crate::transform::TransformPipeline;
+use crate::web::api::ErrorCounters;
 
 /// Run the hot-path engine loop until `shutdown` fires or the ingest channel
 /// closes.
@@ -35,6 +36,7 @@ pub async fn run_hot_path(
     mut raw_rx: IngestReceiver,
     broadcast_tx: broadcast::Sender<DeltaEvent>,
     mut shutdown: watch::Receiver<bool>,
+    error_counters: ErrorCounters,
 ) -> HcResult<()> {
     // -------------------------------------------------------------------------
     // Setup
@@ -188,12 +190,15 @@ pub async fn run_hot_path(
                                             }
                                         }
                                     }
-                                    Err(e) => tracing::warn!(
-                                        target: "ingest",
-                                        "Parse error for table '{}': {}",
-                                        raw_msg.table,
-                                        e
-                                    ),
+                                    Err(e) => {
+                                        tracing::warn!(
+                                            target: "ingest",
+                                            "Parse error for table '{}': {}",
+                                            raw_msg.table,
+                                            e
+                                        );
+                                        error_counters.inc_parse(&raw_msg.table);
+                                    }
                                 }
                             }
                         } else {

@@ -25,6 +25,7 @@ use crate::publish::DeltaEvent;
 use super::api::{
     drillthrough_handler, get_peers_handler, query_handler, reaggregate_handler,
     register_peer_handler, schema_handler, snapshot_handler, status_handler, AppState,
+    ErrorCounters,
 };
 use super::assets::static_handler;
 use super::http_ingest::http_ingest_handler;
@@ -99,6 +100,7 @@ pub async fn start_server(
     ingest_tx: Option<IngestSender>,
     peer_registry: Option<Arc<PeerRegistry>>,
     http_client: reqwest::Client,
+    error_counters: ErrorCounters,
 ) -> HcResult<()> {
     // Pre-compute the snapshot SQL with synthetic _key column so the snapshot
     // endpoint returns the same schema as the engine's delta broadcasts.
@@ -115,6 +117,7 @@ pub async fn start_server(
         ingest_tx,
         peer_registry,
         http_client,
+        error_counters,
     });
 
     let router = Router::new()

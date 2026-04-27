@@ -1,7 +1,9 @@
 use axum::extract::{Path, State};
 use hydrocube::db_manager::DbManager;
 use hydrocube::publish::DeltaEvent;
-use hydrocube::web::api::{drillthrough_handler, reaggregate_handler, status_handler, AppState};
+use hydrocube::web::api::{
+    drillthrough_handler, reaggregate_handler, status_handler, AppState, ErrorCounters,
+};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::broadcast;
@@ -17,6 +19,7 @@ fn make_state(config: hydrocube::config::CubeConfig, db: DbManager) -> Arc<AppSt
         ingest_tx: None,
         peer_registry: None,
         http_client: reqwest::Client::new(),
+        error_counters: ErrorCounters::default(),
     })
 }
 
@@ -195,6 +198,7 @@ async fn test_get_peers_with_registry_returns_peer_list() {
         ingest_tx: None,
         peer_registry: Some(Arc::new(registry)),
         http_client: reqwest::Client::new(),
+        error_counters: ErrorCounters::default(),
     });
     let result = get_peers_handler(State(state)).await;
     let response = axum::response::IntoResponse::into_response(result);
@@ -231,6 +235,7 @@ async fn test_register_peer_adds_to_registry() {
         ingest_tx: None,
         peer_registry: Some(registry.clone()),
         http_client: reqwest::Client::new(),
+        error_counters: ErrorCounters::default(),
     });
     let body = hydrocube::web::api::RegisterPeerRequest {
         name: "peer-b".to_owned(),
@@ -244,4 +249,38 @@ async fn test_register_peer_adds_to_registry() {
     let listed = registry.list();
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].name, "peer-b");
+}
+
+#[tokio::test]
+async fn test_status_exposes_parse_error_counters() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    let db = DbManager::open_in_memory().unwrap();
+    let cfg = trades_config();
+    let (broadcast_tx, _) = broadcast::channel::<DeltaEvent>(16);
+
+    let error_counters = ErrorCounters::default();
+    error_counters
+        .parse_errors
+        .entry("trades".to_owned())
+        .or_insert_with(|| AtomicU64::new(0))
+        .fetch_add(3, Ordering::Relaxed);
+
+    let state = Arc::new(AppState {
+        db,
+        snapshot_sql: "SELECT 1".to_owned(),
+        config: cfg,
+        start_time: Instant::now(),
+        broadcast_tx,
+        ingest_tx: None,
+        peer_registry: None,
+        http_client: reqwest::Client::new(),
+        error_counters,
+    });
+
+    let result = status_handler(State(state)).await;
+    assert!(result.is_ok());
+    let axum::response::Json(resp) = result.unwrap();
+    assert_eq!(resp.parse_errors.get("trades").copied(), Some(3u64));
+    assert!(resp.schema_errors.is_empty());
 }

@@ -8,6 +8,7 @@ use hydrocube::engine::run_hot_path;
 use hydrocube::ingest::RawMessage;
 use hydrocube::persistence;
 use hydrocube::publish::DeltaEvent;
+use hydrocube::web::api::ErrorCounters;
 use serde_json::json;
 use std::time::Duration;
 use tokio::sync::{broadcast, mpsc, watch};
@@ -78,7 +79,15 @@ async fn test_hot_path_processes_messages() {
     let engine_db = db.clone();
     let engine_config = config.clone();
     let handle = tokio::spawn(async move {
-        run_hot_path(engine_db, engine_config, raw_rx, broadcast_tx, shutdown_rx).await
+        run_hot_path(
+            engine_db,
+            engine_config,
+            raw_rx,
+            broadcast_tx,
+            shutdown_rx,
+            ErrorCounters::new(),
+        )
+        .await
     });
 
     // Send two test trade messages.

@@ -73,6 +73,7 @@ futures = "0.3"
 tokio-stream = { version = "0.1", features = ["sync"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 mime_guess = "2"
+dashmap = "6"
 
 [dev-dependencies]
 tempfile = "3"

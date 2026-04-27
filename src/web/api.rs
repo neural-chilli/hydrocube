@@ -15,11 +15,42 @@ use crate::publish::{batch_to_base64_arrow, DeltaEvent};
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Json};
+use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::sync::broadcast;
 
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+// ---------------------------------------------------------------------------
+// ErrorCounters
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Default)]
+pub struct ErrorCounters {
+    pub parse_errors: std::sync::Arc<DashMap<String, AtomicU64>>,
+    pub schema_errors: std::sync::Arc<DashMap<String, AtomicU64>>,
+}
+
+impl ErrorCounters {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn inc_parse(&self, table: &str) {
+        self.parse_errors
+            .entry(table.to_owned())
+            .or_insert_with(|| AtomicU64::new(0))
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn inc_schema(&self, table: &str) {
+        self.schema_errors
+            .entry(table.to_owned())
+            .or_insert_with(|| AtomicU64::new(0))
+            .fetch_add(1, Ordering::Relaxed);
+    }
+}
 
 // ---------------------------------------------------------------------------
 // AppState
@@ -41,6 +72,8 @@ pub struct AppState {
     pub peer_registry: Option<Arc<PeerRegistry>>,
     /// HTTP client for forwarding peer registrations.
     pub http_client: reqwest::Client,
+    /// Per-table parse and schema error counters.
+    pub error_counters: ErrorCounters,
 }
 
 // ---------------------------------------------------------------------------
@@ -97,6 +130,8 @@ pub struct StatusResponse {
     pub sse_client_count: usize,
     pub table_count: usize,
     pub source_count: usize,
+    pub parse_errors: std::collections::HashMap<String, u64>,
+    pub schema_errors: std::collections::HashMap<String, u64>,
 }
 
 pub async fn status_handler(State(state): State<Arc<AppState>>) -> ApiResult<Json<StatusResponse>> {
@@ -104,6 +139,20 @@ pub async fn status_handler(State(state): State<Arc<AppState>>) -> ApiResult<Jso
     let window_id = WINDOW_ID.load(Ordering::Relaxed);
     let cutoff = compaction_cutoff();
     let sse_clients = state.broadcast_tx.receiver_count();
+
+    let parse_errors: std::collections::HashMap<String, u64> = state
+        .error_counters
+        .parse_errors
+        .iter()
+        .map(|e| (e.key().clone(), e.value().load(Ordering::Relaxed)))
+        .collect();
+
+    let schema_errors: std::collections::HashMap<String, u64> = state
+        .error_counters
+        .schema_errors
+        .iter()
+        .map(|e| (e.key().clone(), e.value().load(Ordering::Relaxed)))
+        .collect();
 
     Ok(Json(StatusResponse {
         cube_name: state.config.name.clone(),
@@ -114,6 +163,8 @@ pub async fn status_handler(State(state): State<Arc<AppState>>) -> ApiResult<Jso
         sse_client_count: sse_clients,
         table_count: state.config.tables.len(),
         source_count: state.config.sources.len(),
+        parse_errors,
+        schema_errors,
     }))
 }
 
