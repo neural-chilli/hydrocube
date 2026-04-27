@@ -19,7 +19,10 @@ use hydrocube::persistence;
 use hydrocube::publish::DeltaEvent;
 use hydrocube::shutdown::shutdown_signal;
 use hydrocube::startup::{run_reset_sequence, run_startup_sequence};
+use hydrocube::peers::gossip;
+use hydrocube::peers::{PeerRecord, PeerRegistry, PeerStatus};
 use hydrocube::web::server::start_server;
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() {
@@ -195,6 +198,54 @@ async fn main() {
     let (broadcast_tx, _broadcast_rx) = broadcast::channel::<DeltaEvent>(1024);
 
     // -------------------------------------------------------------------------
+    // Peer registry and gossip (optional — only when peers: config present)
+    // -------------------------------------------------------------------------
+    let http_client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .expect("failed to build reqwest HTTP client");
+
+    let peer_registry: Option<Arc<PeerRegistry>> = if let Some(peers_cfg) = &config.peers {
+        let own_info = PeerRecord {
+            name: config.name.clone(),
+            url: peers_cfg.url.clone(),
+            description: peers_cfg.description.clone(),
+            status: PeerStatus::Online,
+        };
+        let registry = Arc::new(PeerRegistry::new(own_info.clone()));
+
+        // Gossip bootstrap — runs once at startup, fire-and-forget.
+        {
+            let bootstrap_registry = registry.clone();
+            let bootstrap_cfg = peers_cfg.clone();
+            let bootstrap_client = http_client.clone();
+            tokio::spawn(async move {
+                gossip::bootstrap(&own_info, &bootstrap_cfg, &bootstrap_registry, &bootstrap_client).await;
+            });
+        }
+
+        // Health-check loop — runs until process exits.
+        {
+            let hc_registry = (*registry).clone();
+            let hc_cfg = peers_cfg.clone();
+            let hc_client = http_client.clone();
+            tokio::spawn(async move {
+                gossip::run_health_checks(hc_registry, hc_cfg, hc_client).await;
+            });
+        }
+
+        info!(
+            target: "hydrocube",
+            "Peer discovery enabled — {} seed(s) configured",
+            peers_cfg.seeds.len()
+        );
+        Some(registry)
+    } else {
+        info!(target: "hydrocube", "Peer discovery disabled (no peers: config section)");
+        None
+    };
+
+    // -------------------------------------------------------------------------
     // 13. Start compaction thread
     // -------------------------------------------------------------------------
     let compaction = CompactionThread::new(db.clone(), config.clone());
@@ -286,10 +337,12 @@ async fn main() {
         let db_web = db.clone();
         let config_web = config.clone();
         let broadcast_tx_web = broadcast_tx.clone();
+        let peer_registry_web = peer_registry.clone();
+        let http_client_web = http_client.clone();
 
         tokio::spawn(async move {
             if let Err(e) =
-                start_server(db_web, config_web, broadcast_tx_web, port, Some(web_ingest_tx), None, reqwest::Client::new()).await
+                start_server(db_web, config_web, broadcast_tx_web, port, Some(web_ingest_tx), peer_registry_web, http_client_web).await
             {
                 error!("Web server error: {}", e);
             }
