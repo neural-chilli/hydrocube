@@ -1,7 +1,4 @@
-use hydrocube::config::{
-    AggregationConfig, CubeConfig, DataFormat, LoadTiming, PublishHookConfig, SourceConfig,
-    SourceType, TableConfig, TableMode,
-};
+use hydrocube::config::{CubeConfig, LoadTiming, SourceType, TableMode};
 
 fn minimal_new_config_yaml() -> &'static str {
     r#"
