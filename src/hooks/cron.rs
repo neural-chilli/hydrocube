@@ -8,6 +8,8 @@ use chrono::{DateTime, Utc};
 use cron::Schedule;
 use std::str::FromStr;
 
+use crate::config::CubeConfig;
+use crate::db_manager::DbManager;
 use crate::error::{HcError, HcResult};
 
 /// Parse a 5-field or 6-field cron expression into a `cron::Schedule`.
@@ -28,6 +30,82 @@ pub fn parse_schedule(expr: &str) -> HcResult<Schedule> {
 /// Return the next fire time after `after`, or `None` if the schedule never fires.
 pub fn next_fire_after(schedule: &Schedule, after: &DateTime<Utc>) -> Option<DateTime<Utc>> {
     schedule.after(after).next()
+}
+
+/// Spawn cron tasks for every snapshot hook that declares a schedule.
+/// Returns the join handles so callers can await or drop them.
+pub fn spawn_snapshot_cron_tasks(
+    config: &CubeConfig,
+    db: DbManager,
+    shutdown: tokio::sync::watch::Receiver<bool>,
+) -> Vec<tokio::task::JoinHandle<()>> {
+    let snapshots = config.aggregation.snapshots.as_deref().unwrap_or(&[]);
+    snapshots
+        .iter()
+        .filter_map(|snap| {
+            let schedule = match parse_schedule(&snap.schedule) {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::error!("invalid snapshot schedule '{}': {}", snap.name, e);
+                    return None;
+                }
+            };
+            let name = snap.name.clone();
+            let cfg = config.clone();
+            let db_clone = db.clone();
+            let shutdown_clone = shutdown.clone();
+            Some(spawn_cron_task(
+                schedule,
+                move |_| {
+                    let runner = crate::hooks::runner::HookRunner::new(cfg.clone(), db_clone.clone());
+                    let n = name.clone();
+                    async move {
+                        if let Err(e) = runner.run_snapshot(&n).await {
+                            tracing::error!(target: "cron", "snapshot '{}' error: {}", n, e);
+                        }
+                    }
+                },
+                shutdown_clone,
+            ))
+        })
+        .collect()
+}
+
+/// Spawn cron tasks for every housekeeping job that declares a schedule.
+pub fn spawn_housekeeping_cron_tasks(
+    config: &CubeConfig,
+    db: DbManager,
+    shutdown: tokio::sync::watch::Receiver<bool>,
+) -> Vec<tokio::task::JoinHandle<()>> {
+    let jobs = config.aggregation.housekeeping.as_deref().unwrap_or(&[]);
+    jobs.iter()
+        .filter_map(|job| {
+            let schedule = match parse_schedule(&job.schedule) {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::error!("invalid housekeeping schedule '{}': {}", job.name, e);
+                    return None;
+                }
+            };
+            let job_name = job.name.clone();
+            let cfg = config.clone();
+            let db_clone = db.clone();
+            let shutdown_clone = shutdown.clone();
+            Some(spawn_cron_task(
+                schedule,
+                move |_| {
+                    let runner = crate::hooks::runner::HookRunner::new(cfg.clone(), db_clone.clone());
+                    let n = job_name.clone();
+                    async move {
+                        if let Err(e) = runner.run_housekeeping(&n).await {
+                            tracing::error!(target: "cron", "housekeeping '{}' error: {}", n, e);
+                        }
+                    }
+                },
+                shutdown_clone,
+            ))
+        })
+        .collect()
 }
 
 /// Spawn a tokio task that fires `callback` on each cron tick until the

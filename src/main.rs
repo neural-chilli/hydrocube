@@ -14,6 +14,7 @@ use hydrocube::compaction::CompactionThread;
 use hydrocube::config::CubeConfig;
 use hydrocube::db_manager::DbManager;
 use hydrocube::error::exit_code;
+use hydrocube::hooks::cron::{spawn_housekeeping_cron_tasks, spawn_snapshot_cron_tasks};
 use hydrocube::persistence;
 use hydrocube::publish::DeltaEvent;
 use hydrocube::shutdown::shutdown_signal;
@@ -262,6 +263,12 @@ async fn main() {
             error!("Engine error: {}", e);
         }
     });
+
+    // -------------------------------------------------------------------------
+    // 13c. Spawn snapshot and housekeeping cron tasks
+    // -------------------------------------------------------------------------
+    let _snapshot_handles = spawn_snapshot_cron_tasks(&config, db.clone(), shutdown_rx.clone());
+    let _hk_handles = spawn_housekeeping_cron_tasks(&config, db.clone(), shutdown_rx.clone());
 
     // -------------------------------------------------------------------------
     // 14. Start web server if UI enabled

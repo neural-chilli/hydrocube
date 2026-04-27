@@ -164,3 +164,106 @@ aggregation:
         .await
         .expect("startup_marker table must exist after engine init");
 }
+
+#[tokio::test]
+async fn test_snapshot_cron_fires_and_executes_sql() {
+    use hydrocube::hooks::cron::spawn_snapshot_cron_tasks;
+    use tokio::sync::watch;
+
+    let db = DbManager::open_in_memory().unwrap();
+
+    let cfg: hydrocube::config::CubeConfig = serde_yaml::from_str(
+        r#"
+name: test
+tables:
+  - name: ev
+    mode: append
+    schema:
+      columns:
+        - { name: x, type: VARCHAR }
+sources: []
+window: { interval_ms: 1000 }
+persistence: { enabled: false, path: ":memory:", flush_interval: 10 }
+aggregation:
+  key_columns: [x]
+  snapshots:
+    - name: hourly
+      schedule: "* * * * * *"
+      sql: |
+        CREATE TABLE IF NOT EXISTS snap_ran (ts BIGINT);
+        INSERT INTO snap_ran VALUES (epoch_ms(now()))
+  publish:
+    sql: "SELECT x FROM ev GROUP BY x"
+"#,
+    )
+    .unwrap();
+
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
+
+    let handles = spawn_snapshot_cron_tasks(&cfg, db.clone(), shutdown_rx);
+
+    // Wait 1.5 s — schedule fires every second so at least one execution.
+    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+    let _ = shutdown_tx.send(true);
+    for h in handles {
+        let _ = h.await;
+    }
+
+    let rows = db
+        .query_json("SELECT COUNT(*) AS n FROM snap_ran", vec![])
+        .await
+        .expect("snap_ran must exist after cron fires");
+    let n = rows[0]["n"].as_i64().unwrap_or(0);
+    assert!(n >= 1, "snapshot cron must have fired at least once, got {n}");
+}
+
+#[tokio::test]
+async fn test_housekeeping_cron_fires_and_executes_sql() {
+    use hydrocube::hooks::cron::spawn_housekeeping_cron_tasks;
+    use tokio::sync::watch;
+
+    let db = DbManager::open_in_memory().unwrap();
+
+    let cfg: hydrocube::config::CubeConfig = serde_yaml::from_str(
+        r#"
+name: test
+tables:
+  - name: ev
+    mode: append
+    schema:
+      columns:
+        - { name: x, type: VARCHAR }
+sources: []
+window: { interval_ms: 1000 }
+persistence: { enabled: false, path: ":memory:", flush_interval: 10 }
+aggregation:
+  key_columns: [x]
+  housekeeping:
+    - name: cleanup
+      schedule: "* * * * * *"
+      sql: |
+        CREATE TABLE IF NOT EXISTS hk_ran (ts BIGINT);
+        INSERT INTO hk_ran VALUES (epoch_ms(now()))
+  publish:
+    sql: "SELECT x FROM ev GROUP BY x"
+"#,
+    )
+    .unwrap();
+
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
+
+    let handles = spawn_housekeeping_cron_tasks(&cfg, db.clone(), shutdown_rx);
+
+    tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+    let _ = shutdown_tx.send(true);
+    for h in handles {
+        let _ = h.await;
+    }
+
+    let rows = db
+        .query_json("SELECT COUNT(*) AS n FROM hk_ran", vec![])
+        .await
+        .expect("hk_ran must exist after housekeeping cron fires");
+    let n = rows[0]["n"].as_i64().unwrap_or(0);
+    assert!(n >= 1, "housekeeping cron must have fired at least once, got {n}");
+}
