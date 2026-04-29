@@ -12,7 +12,7 @@ use axum::Router;
 use hydrocube::config::CubeConfig;
 use hydrocube::db_manager::DbManager;
 use hydrocube::publish::DeltaEvent;
-use hydrocube::web::api::{build_rate_limiters, AppState, ErrorCounters};
+use hydrocube::web::api::{AppState, ErrorCounters};
 use hydrocube::web::http_ingest::http_ingest_handler;
 use tokio::sync::{broadcast, mpsc};
 use tower::ServiceExt;

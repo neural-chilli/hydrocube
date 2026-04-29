@@ -92,6 +92,7 @@ async fn index_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse 
 ///
 /// This function runs until the server shuts down (i.e. it does not return
 /// on success — call it as a spawned task or the last thing in main).
+#[allow(clippy::too_many_arguments)]
 pub async fn start_server(
     db: DbManager,
     config: CubeConfig,
